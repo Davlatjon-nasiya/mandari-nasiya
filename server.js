@@ -271,9 +271,21 @@ app.listen(port, '0.0.0.0', () => console.log('Mandarin Mini App ready on port '
 
 if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.startsWith('https://')) {
   const TelegramBot = require('node-telegram-bot-api');
+  const url = process.env.WEBAPP_URL;
   bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
-  bot.onText(/\/start/, msg => bot.sendMessage(msg.chat.id, '🍊 Mandarin Nasiya\nTelefonlarni ko‘ring, oylik to‘lovni hisoblang va ariza yuboring.', {
-    reply_markup: { keyboard: [[{ text: '📱 Ilovani ochish', web_app: { url: process.env.WEBAPP_URL } }]], resize_keyboard: true }
-  }));
+  // MUHIM: oddiy (keyboard) tugma orqali ochilganda Telegram initData bermaydi,
+  // shuning uchun ariza/admin ishlamaydi. Inline tugma va Menu tugmasi ishlatiladi.
+  bot.setChatMenuButton({ menu_button: JSON.stringify({ type: 'web_app', text: '📱 Ilova', web_app: { url } }) })
+    .catch(e => console.error('MenuButton:', e.message));
+  bot.onText(/\/start/, async msg => {
+    try {
+      await bot.sendMessage(msg.chat.id, '🍊 Mandarin Nasiya', { reply_markup: { remove_keyboard: true } }); // eski keyboard tugmani o‘chiradi
+      await bot.sendMessage(msg.chat.id, 'Telefonlarni ko‘ring, oylik to‘lovni hisoblang va ariza yuboring.', {
+        reply_markup: { inline_keyboard: [[{ text: '📱 Ilovani ochish', web_app: { url } }]] }
+      });
+    } catch (e) { console.error('/start:', e.message); }
+  });
   bot.on('polling_error', err => console.error('Telegram polling:', err.message));
+} else {
+  console.warn('BOT_TOKEN yoki WEBAPP_URL (https://...) sozlanmagan — bot ishlamaydi.');
 }

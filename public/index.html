@@ -1,100 +1,31 @@
-
-<!DOCTYPE html>
-<html lang="uz">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mandarin Nasiya</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!doctype html>
+<html lang="uz"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mandarin Nasiya</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-*{box-sizing:border-box}body{margin:0;padding:16px;background:#0d1329;color:white;font-family:Arial}
-h1{font-size:23px}h2{font-size:19px}
-.card{background:#192641;border-radius:16px;padding:15px;margin:12px 0}
-button,input,select{padding:12px;border-radius:10px;font-size:15px}
-button{background:#ff962d;color:#171323;border:0;font-weight:bold}
-input,select{width:100%;margin:6px 0 12px;background:#101a30;color:white;border:1px solid #40506c}
-nav{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}nav button{flex:1}
-.secondary{background:#34435e;color:white}.hidden{display:none!important}
-.price{color:#ffbd71;font-weight:bold;font-size:20px}#msg{color:#ffc078;overflow-wrap:anywhere}
-img{max-width:100%;max-height:180px;object-fit:contain}
-label{font-size:13px;color:#c8d3e6}
-</style>
-</head>
-<body>
-<h1>🍊 Mandarin Nasiya</h1>
-<div id="msg"></div>
-<section id="shop">
-<div class="card"><h2>Telefonlar nasiyaga!</h2>Telefon tanlang va ariza yuboring.</div>
-<nav><button onclick="tab('catalog')">📱 Telefonlar</button><button class="secondary" onclick="tab('mine')">📋 Arizalarim</button></nav>
-<div id="catalog"></div><div id="mine" class="hidden"></div>
-</section>
-<section id="admin" class="hidden">
-<button class="secondary" onclick="back()">← Orqaga</button><h2>⚙️ Admin panel</h2>
-<nav>
-<button onclick="atab('add')">➕ Qo‘shish</button>
-<button class="secondary" onclick="atab('stock')">📦 Ombor</button>
-<button class="secondary" onclick="atab('apps')">📋 Arizalar</button>
-<button class="secondary" onclick="atab('settings')">💰 Ustama</button>
-</nav>
-<div id="add" class="card">
-<h2>Telefon qo‘shish</h2>
-<label>Nomi</label><input id="pn" placeholder="iPhone 15 Pro">
-<label>Narxi (so‘m)</label><input id="pp" type="number" min="1">
-<label>Ombor soni</label><input id="ps" type="number" min="0" value="1">
-<label>Rasm havolasi</label><input id="pi" placeholder="https://...">
-<button onclick="addProduct()">Saqlash</button>
-</div>
-<div id="stock" class="hidden"></div><div id="apps" class="hidden"></div>
-<div id="settings" class="card hidden"><h2>Nasiya ustamasi (%)</h2><input id="mk" type="number" min="0" max="300"><button onclick="saveMarkup()">Saqlash</button></div>
-</section>
+*{box-sizing:border-box}body{margin:0;padding:16px;background:#0d1329;color:#f7f8ff;font-family:Arial;max-width:760px;margin-inline:auto}h1{font-size:25px}.card{background:#192641;border:1px solid #2a3854;border-radius:18px;padding:16px;margin:12px 0}button,input,select{font:inherit;border-radius:11px;padding:12px}button{border:0;background:#ff962d;color:#20162b;font-weight:bold}input,select{width:100%;margin:6px 0 12px;background:#101a30;color:white;border:1px solid #40506c}nav{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}nav button{flex:1}.secondary{background:#34435e;color:white}.hidden{display:none!important}.price{color:#ffbd71;font-size:20px;font-weight:bold}#msg{padding:8px 0;color:#ffc078;overflow-wrap:anywhere;white-space:pre-wrap}.muted{color:#b8c4da;font-size:14px}img{max-width:100%;max-height:200px;object-fit:contain}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}label{font-size:13px;color:#c8d3e6}
+</style></head><body>
+<h1>🍊 Mandarin Nasiya</h1><div id="msg"></div>
+<section id="shop"><div class="card"><h2>Telefonlar nasiyaga!</h2>Telefon tanlang, oylik to‘lovni hisoblang va ariza qoldiring.<p>3, 6, 12, 18 yoki 24 oy.</p></div><nav><button onclick="shopTab('catalog')">📱 Telefonlar</button><button class="secondary" onclick="shopTab('mine')">📋 Arizalarim</button><button class="secondary" onclick="openAdmin()">⚙️ Admin panel</button></nav><div id="catalog"></div><div id="mine" class="hidden"></div></section>
+<section id="login" class="hidden"><div class="card"><h2>🔐 Admin kirish</h2><label>Admin paroli</label><input id="password" type="password" placeholder="Render’dagi ADMIN_PASSWORD"><button onclick="login()">Kirish</button><button class="secondary" onclick="back()">Orqaga</button></div></section>
+<section id="admin" class="hidden"><button class="secondary" onclick="logout()">Chiqish</button><h2>⚙️ Admin panel</h2><nav><button onclick="aTab('add')">➕ Telefon qo‘shish</button><button class="secondary" onclick="aTab('stock')">📦 Ombor</button><button class="secondary" onclick="aTab('apps')">📋 Arizalar</button><button class="secondary" onclick="aTab('settings')">💰 Ustama</button></nav>
+<div id="add" class="card"><h2>Telefon qo‘shish</h2><label>Model</label><input id="pn" placeholder="iPhone 15 Pro"><label>Narxi (so‘m)</label><input id="pp" type="number" min="1"><label>Ombor soni</label><input id="ps" type="number" min="0" value="1"><label>Rasm URL (ixtiyoriy)</label><input id="pi" placeholder="https://..."><button onclick="addProduct()">Saqlash</button></div><div id="stock" class="hidden"></div><div id="apps" class="hidden"></div><div id="settings" class="card hidden"><h2>Nasiya ustamasi (%)</h2><input id="mk" type="number" min="0" max="300"><button onclick="saveMarkup()">Saqlash</button></div></section>
 <script>
-const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
-const initData=tg?.initData||'';const $=id=>document.getElementById(id);
-let me=null,products=[];
-function say(t){$('msg').textContent=t}
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function money(n){return Number(n).toLocaleString('uz-UZ')+' so‘m'}
-async function api(url,opt={}){
- const r=await fetch(url,{...opt,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData,...(opt.headers||{})}});
- const d=await r.json().catch(()=>({}));
- if(!r.ok)throw Error(d.error||'Xatolik '+r.status);return d;
-}
-async function start(){
- if(!initData){say('Ilovani Telegram bot ichidan oching.');return}
- try{me=await api('/api/me');await catalog()}catch(e){say(e.message)}
-}
-async function catalog(){
- try{
- const d=await api('/api/catalog');products=d.products||[];
- $('catalog').innerHTML=products.length?products.map(p=>`<div class="card">${p.image?`<img src="${esc(p.image)}">`:''}<h2>${esc(p.name)}</h2><p class="price">${money(p.price)}</p><p>Omborda: ${p.stock}</p>${p.stock>0?`<label>Muddat</label><select id="m${p.id}">${[3,6,12,18,24].map(n=>`<option>${n}</option>`).join('')}</select><label>Boshlang‘ich to‘lov</label><input id="d${p.id}" type="number" min="0" value="0"><button onclick="apply(${p.id})">Ariza berish</button>`:'Mavjud emas'}</div>`).join(''):'<div class="card">Telefonlar hali qo‘shilmagan.</div>';
- }catch(e){say(e.message)}
-}
-async function apply(id){
- try{let customer=prompt('Ism-familiya:');if(!customer)return;let phone=prompt('Telefon raqami:');if(!phone)return;
- let d=await api('/api/applications',{method:'POST',body:JSON.stringify({customer,phone,product_id:id,months:Number($('m'+id).value),down:Number($('d'+id).value||0)})});say('Ariza yuborildi: #'+d.id)
- }catch(e){say(e.message)}
-}
-function tab(t){$('catalog').classList.toggle('hidden',t!=='catalog');$('mine').classList.toggle('hidden',t!=='mine');if(t==='mine')mine()}
-async function mine(){try{let a=await api('/api/applications/mine');$('mine').innerHTML=a.map(x=>`<div class="card">${esc(x.product)} · ${x.months} oy<br>Holat: ${esc(x.status)}</div>`).join('')||'Arizalar yo‘q'}catch(e){say(e.message)}}
-function atab(t){['add','stock','apps','settings'].forEach(x=>$(x).classList.toggle('hidden',x!==t))}
-$('admin') // admin panel faqat admin uchun ochiladi
-async function loadAdmin(){
- if(!me?.admin){say('Admin ruxsati yo‘q');return}
- try{let d=await api('/api/admin');products=d.products||[];$('mk').value=d.markup;renderStock(d.products);renderApps(d.applications)}
- catch(e){say(e.message)}
-}
-function renderStock(a){$('stock').innerHTML='<h2>Ombor</h2>'+(a||[]).map(p=>`<div class="card"><b>${esc(p.name)}</b><label>Nomi</label><input id="n${p.id}" value="${esc(p.name)}"><label>Narxi</label><input id="v${p.id}" type="number" value="${p.price}"><label>Soni</label><input id="s${p.id}" type="number" value="${p.stock}"><label>Holati</label><select id="a${p.id}"><option value="1" ${p.active?'selected':''}>Faol</option><option value="0" ${!p.active?'selected':''}>Yashirilgan</option></select><button onclick="updateProduct(${p.id})">Saqlash</button></div>`).join('')}
-function renderApps(a){$('apps').innerHTML='<h2>Nasiya arizalari</h2>'+(a||[]).map(x=>`<div class="card"><b>#${x.id} ${esc(x.customer)}</b><p>${esc(x.product)} · ${x.months} oy</p><p>Tel: ${esc(x.phone)}</p><p>Holat: ${esc(x.status)}</p><select id="st${x.id}">${[['new','Yangi'],['review','Ko‘rib chiqilmoqda'],['approved','Tasdiqlandi'],['rejected','Rad etildi']].map(([v,t])=>`<option value="${v}" ${x.status===v?'selected':''}>${t}</option>`).join('')}</select><button onclick="updateApp(${x.id})">Holatni saqlash</button></div>`).join('')}
-async function addProduct(){try{await api('/api/admin/products',{method:'POST',body:JSON.stringify({name:$('pn').value,price:Number($('pp').value),stock:Number($('ps').value),image:$('pi').value})});say('Telefon qo‘shildi');await loadAdmin();atab('stock')}catch(e){say(e.message)}}
-async function updateProduct(id){try{await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:$('n'+id).value,price:Number($('v'+id).value),stock:Number($('s'+id).value),active:Number($('a'+id).value)})});say('Mahsulot saqlandi');await loadAdmin()}catch(e){say(e.message)}}
-async function updateApp(id){try{await api('/api/admin/applications/'+id,{method:'PATCH',body:JSON.stringify({status:$('st'+id).value})});say('Ariza yangilandi');await loadAdmin();atab('apps')}catch(e){say(e.message)}}
-async function saveMarkup(){try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({markup:Number($('mk').value)})});say('Ustama saqlandi')}catch(e){say(e.message)}}
-function back(){$('admin').classList.add('hidden');$('shop').classList.remove('hidden');catalog()}
-const adminButton=document.createElement('button');adminButton.textContent='⚙️ Admin';adminButton.className='secondary hidden';adminButton.id='adminButton';document.querySelector('body').insertBefore(adminButton,$('msg'));
-adminButton.onclick=async()=>{if(!me?.admin){say('Admin ruxsati yo‘q');return}$('shop').classList.add('hidden');$('admin').classList.remove('hidden');await loadAdmin()};
-const oldStart=start;
-async function boot(){await oldStart();if(me?.admin)adminButton.classList.remove('hidden')}
-boot();
-</script>
-</body>
-</html>
+var tg=window.Telegram&&window.Telegram.WebApp;if(tg){tg.ready();tg.expand()}var initData=tg?tg.initData:'';var $=function(id){return document.getElementById(id)};var token=sessionStorage.getItem('mandarinAdminToken')||'';var markup=50;
+function say(t){$('msg').textContent=t||''}function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}function money(n){return Number(n).toLocaleString('uz-UZ')+' so‘m'}
+async function api(url,opt){opt=opt||{};var headers={'Content-Type':'application/json','X-Telegram-Init-Data':initData};if(token)headers.Authorization='Bearer '+token;Object.assign(headers,opt.headers||{});var r=await fetch(url,Object.assign({},opt,{headers:headers}));var d=await r.json().catch(function(){return {}});if(!r.ok){if(r.status===401&&token){token='';sessionStorage.removeItem('mandarinAdminToken')}throw Error(d.error||('Xatolik '+r.status))}return d}
+async function catalog(){try{var d=await api('/api/catalog');markup=Number(d.markup||0);var a=d.products||[];if(!a.length){$('catalog').innerHTML='<div class="card">Telefonlar hali qo‘shilmagan. Admin paneldan mahsulot qo‘shing.</div>';return}var html='<div class="grid">';a.forEach(function(p){html+='<div class="card">'+(p.image?'<img loading="lazy" src="'+esc(p.image)+'" onerror="this.style.display=\\'none\\'">':'')+'<h2>'+esc(p.name)+'</h2><p class="price">'+money(p.price)+'</p><p>Omborda: '+p.stock+'</p>';if(p.stock>0){html+='<label>Muddat</label><select id="m'+p.id+'" onchange="calc('+p.id+','+p.price+')"><option>3</option><option>6</option><option>12</option><option>18</option><option>24</option></select><label>Boshlang‘ich to‘lov</label><input id="d'+p.id+'" type="number" min="0" max="'+p.price+'" value="0" oninput="calc('+p.id+','+p.price+')"><p id="c'+p.id+'"></p><button onclick="applyFor('+p.id+')">Ariza qoldirish</button>'}else html+='<p>Hozir mavjud emas</p>';html+='</div>'});$('catalog').innerHTML=html+'</div>';a.forEach(function(p){if(p.stock>0)calc(p.id,p.price)})}catch(e){say(e.message)}}
+function calc(id,price){var m=Number($('m'+id).value||3),down=Math.max(0,Number($('d'+id).value||0)),total=Math.round(price*(1+markup/100));$('c'+id).textContent='Ustama bilan: '+money(total)+' · Oyiga: '+money(Math.ceil(Math.max(0,total-down)/m))}
+async function applyFor(id){if(!initData){say('Ariza yuborish uchun Telegram bot ichidan oching.');return}var customer=prompt('Ism-familiya:');if(!customer)return;var phone=prompt('Telefon raqami:');if(!phone)return;try{var d=await api('/api/applications',{method:'POST',body:JSON.stringify({customer:customer,phone:phone,product_id:id,months:Number($('m'+id).value),down:Number($('d'+id).value||0)})});say('Ariza qabul qilindi. Raqami: #'+d.id);shopTab('mine')}catch(e){say(e.message)}}
+async function shopTab(t){$('catalog').classList.toggle('hidden',t!=='catalog');$('mine').classList.toggle('hidden',t!=='mine');if(t==='mine'){if(!initData){say('Arizalarni Telegram ichidan ko‘ring.');return}try{var a=await api('/api/applications/mine');$('mine').innerHTML=a.length?a.map(function(x){return '<div class="card"><b>#'+x.id+' '+esc(x.product)+'</b><p>'+x.months+' oy · '+money(x.down)+'</p><p>Holat: '+esc(x.status)+'</p></div>'}).join(''):'<div class="card">Arizalar yo‘q.</div>'}catch(e){say(e.message)}}}
+function openAdmin(){$('shop').classList.add('hidden');$('admin').classList.add('hidden');$('login').classList.remove('hidden');say('');if(token)enterAdmin()}
+async function login(){try{var d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('password').value})});token=d.token;sessionStorage.setItem('mandarinAdminToken',token);$('password').value='';await enterAdmin()}catch(e){say(e.message)}}
+async function enterAdmin(){try{var d=await api('/api/admin');$('login').classList.add('hidden');$('shop').classList.add('hidden');$('admin').classList.remove('hidden');$('mk').value=d.markup;renderStock(d.products);renderApps(d.applications);aTab('add');say('Admin panel ochildi.')}catch(e){say(e.message)}}
+function logout(){token='';sessionStorage.removeItem('mandarinAdminToken');$('admin').classList.add('hidden');$('login').classList.remove('hidden');say('Chiqdingiz.')}function back(){$('login').classList.add('hidden');$('admin').classList.add('hidden');$('shop').classList.remove('hidden');catalog();say('')}function aTab(t){['add','stock','apps','settings'].forEach(function(x){$(x).classList.toggle('hidden',x!==t)})}
+function renderStock(a){$('stock').innerHTML='<h2>Ombor</h2>'+(a||[]).map(function(p){return '<div class="card"><b>'+esc(p.name)+'</b><label>Nomi</label><input id="n'+p.id+'" value="'+esc(p.name)+'"><label>Narxi</label><input id="v'+p.id+'" type="number" value="'+p.price+'"><label>Soni</label><input id="s'+p.id+'" type="number" value="'+p.stock+'"><label>Holati</label><select id="a'+p.id+'"><option value="1" '+(p.active?'selected':'')+'>Faol</option><option value="0" '+(!p.active?'selected':'')+'>Yashirilgan</option></select><button onclick="updateProduct('+p.id+')">Saqlash</button></div>'}).join('')||'<div class="card">Ombor bo‘sh.</div>'}
+function renderApps(a){$('apps').innerHTML='<h2>Arizalar</h2>'+(a||[]).map(function(x){return '<div class="card"><b>#'+x.id+' '+esc(x.customer)+'</b><p>'+esc(x.product)+' · '+x.months+' oy</p><p>Telefon: '+esc(x.phone)+'</p><p>Telegram ID: '+esc(x.telegram_id)+'</p><p>Avans: '+money(x.down)+'</p><p>Holat: '+esc(x.status)+'</p><select id="st'+x.id+'">'+[['new','Yangi'],['review','Ko‘rib chiqilmoqda'],['approved','Tasdiqlandi'],['rejected','Rad etildi']].map(function(s){return '<option value="'+s[0]+'" '+(x.status===s[0]?'selected':'')+'>'+s[1]+'</option>'}).join('')+'</select><button onclick="updateApp('+x.id+')">Holatni saqlash</button></div>'}).join('')||'<div class="card">Hali ariza kelmagan.</div>'}
+async function refresh(t){var d=await api('/api/admin');renderStock(d.products);renderApps(d.applications);$('mk').value=d.markup;aTab(t)}
+async function addProduct(){try{await api('/api/admin/products',{method:'POST',body:JSON.stringify({name:$('pn').value,price:Number($('pp').value),stock:Number($('ps').value),image:$('pi').value})});say('Telefon qo‘shildi.');$('pn').value='';$('pp').value='';$('ps').value='1';$('pi').value='';await refresh('stock');catalog()}catch(e){say(e.message)}}
+async function updateProduct(id){try{await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:$('n'+id).value,price:Number($('v'+id).value),stock:Number($('s'+id).value),active:Number($('a'+id).value)})});say('Mahsulot saqlandi.');await refresh('stock');catalog()}catch(e){say(e.message)}}
+async function updateApp(id){try{await api('/api/admin/applications/'+id,{method:'PATCH',body:JSON.stringify({status:$('st'+id).value})});say('Ariza yangilandi.');await refresh('apps')}catch(e){say(e.message)}}
+async function saveMarkup(){try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({markup:Number($('mk').value)})});markup=Number($('mk').value);say('Ustama saqlandi.');catalog()}catch(e){say(e.message)}}
+async function boot(){await catalog();if(token)enterAdmin()}boot();
+</script></body></html>

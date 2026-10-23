@@ -120,7 +120,7 @@ function calc(id){
 
 /* ---- Ariza ---- */
 function applyFor(id){
-  if(!initData){say('Ariza yuborish uchun Telegram bot ichidan ilovani oching.');return}
+  if(!initData){say('Telegram ma’lumoti topilmadi. Ilovani bot ichidagi inline tugma (📱 Ilovani ochish) yoki chap pastdagi “📱 Ilova” menyu tugmasi orqali oching.');return}
   var p=findP(id);if(!p){say('Telefon topilmadi. Sahifani yangilang.');return}
   selectedProduct=p;
   $('selectedProduct').textContent=p.name+' — '+money(p.price);

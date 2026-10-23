@@ -1,457 +1,100 @@
 
-
 <!DOCTYPE html>
-
 <html lang="uz">
-
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport" content="width=device-width,initial-scale=1">
-
 <title>Mandarin Nasiya</title>
-
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
 <style>
-
-*{box-sizing:border-box}
-
-body{margin:0;padding:16px;background:#0d1329;color:#fff;font-family:Arial,sans-serif}
-
-header,.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
-
+*{box-sizing:border-box}body{margin:0;padding:16px;background:#0d1329;color:white;font-family:Arial}
 h1{font-size:23px}h2{font-size:19px}
-
-.card{background:#17233a;padding:15px;border-radius:17px;margin:12px 0}
-
-.hero{padding:22px;border-radius:20px;background:linear-gradient(120deg,#ff941f,#ee481b)}
-
+.card{background:#192641;border-radius:16px;padding:15px;margin:12px 0}
 button,input,select{padding:12px;border-radius:10px;font-size:15px}
-
-button{background:#ff941f;color:#171323;border:0;font-weight:bold}
-
-input,select{width:100%;background:#101a30;color:white;border:1px solid #40506c;margin:6px 0 12px}
-
-nav{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0}
-
-nav button{flex:1}.secondary{background:#34435e;color:white}
-
-.muted{color:#b8c4d9;font-size:13px}.price{color:#ffb96b;font-size:20px;font-weight:bold}
-
-img{max-width:100%;max-height:190px;object-fit:contain}
-
-.hidden{display:none!important}
-
-#message{color:#ffc078;margin:12px 0;overflow-wrap:anywhere}
-
+button{background:#ff962d;color:#171323;border:0;font-weight:bold}
+input,select{width:100%;margin:6px 0 12px;background:#101a30;color:white;border:1px solid #40506c}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}nav button{flex:1}
+.secondary{background:#34435e;color:white}.hidden{display:none!important}
+.price{color:#ffbd71;font-weight:bold;font-size:20px}#msg{color:#ffc078;overflow-wrap:anywhere}
+img{max-width:100%;max-height:180px;object-fit:contain}
 label{font-size:13px;color:#c8d3e6}
-
 </style>
-
 </head>
-
 <body>
-
-<header>
-
 <h1>🍊 Mandarin Nasiya</h1>
-
-<button id="adminButton" class="secondary hidden">⚙️ Admin</button>
-
-</header>
-
-<div id="message"></div>
-
+<div id="msg"></div>
 <section id="shop">
-
-<div class="hero">
-
-<h2>Telefonlar nasiyaga!</h2>
-
-<p>O‘zingizga mos telefonni tanlang va ariza yuboring.</p>
-
-<b>3–24 oy muddat</b>
-
-</div>
-
-<nav>
-
-<button onclick="showSection('catalog')">📱 Telefonlar</button>
-
-<button class="secondary" onclick="showSection('mine')">📋 Arizalarim</button>
-
-</nav>
-
-<div id="catalog"></div>
-
-<div id="mine" class="hidden"></div>
-
+<div class="card"><h2>Telefonlar nasiyaga!</h2>Telefon tanlang va ariza yuboring.</div>
+<nav><button onclick="tab('catalog')">📱 Telefonlar</button><button class="secondary" onclick="tab('mine')">📋 Arizalarim</button></nav>
+<div id="catalog"></div><div id="mine" class="hidden"></div>
 </section>
-
 <section id="admin" class="hidden">
-
-<button class="secondary" onclick="backShop()">← Orqaga</button>
-
-<h2>⚙️ Admin panel</h2>
-
+<button class="secondary" onclick="back()">← Orqaga</button><h2>⚙️ Admin panel</h2>
 <nav>
-
-<button onclick="adminSection('add')">➕ Telefon qo‘shish</button>
-
-<button class="secondary" onclick="adminSection('stock')">📦 Ombor</button>
-
-<button class="secondary" onclick="adminSection('apps')">📋 Arizalar</button>
-
-<button class="secondary" onclick="adminSection('settings')">💰 Ustama</button>
-
+<button onclick="atab('add')">➕ Qo‘shish</button>
+<button class="secondary" onclick="atab('stock')">📦 Ombor</button>
+<button class="secondary" onclick="atab('apps')">📋 Arizalar</button>
+<button class="secondary" onclick="atab('settings')">💰 Ustama</button>
 </nav>
-
 <div id="add" class="card">
-
-<h2>Yangi telefon</h2>
-
-<label>Telefon nomi</label><input id="pname" placeholder="iPhone 15 Pro">
-
-<label>Narxi (so‘m)</label><input id="pprice" type="number" min="1">
-
-<label>Ombordagi soni</label><input id="pstock" type="number" min="0" value="1">
-
-<label>Rasm havolasi (ixtiyoriy)</label><input id="pimage" placeholder="https://...">
-
+<h2>Telefon qo‘shish</h2>
+<label>Nomi</label><input id="pn" placeholder="iPhone 15 Pro">
+<label>Narxi (so‘m)</label><input id="pp" type="number" min="1">
+<label>Ombor soni</label><input id="ps" type="number" min="0" value="1">
+<label>Rasm havolasi</label><input id="pi" placeholder="https://...">
 <button onclick="addProduct()">Saqlash</button>
-
 </div>
-
-<div id="stock" class="hidden"></div>
-
-<div id="apps" class="hidden"></div>
-
-<div id="settings" class="card hidden">
-
-<h2>Nasiya ustamasi (%)</h2>
-
-<input id="markup" type="number" min="0" max="300">
-
-<button onclick="saveMarkup()">Ustamani saqlash</button>
-
-</div>
-
+<div id="stock" class="hidden"></div><div id="apps" class="hidden"></div>
+<div id="settings" class="card hidden"><h2>Nasiya ustamasi (%)</h2><input id="mk" type="number" min="0" max="300"><button onclick="saveMarkup()">Saqlash</button></div>
 </section>
-
 <script>
-
-const tg=window.Telegram?.WebApp;
-
-tg?.ready();tg?.expand();
-
-const initData=tg?.initData||'';
-
-const $=id=>document.getElementById(id);
-
-let me=null,products=[],markup=50;
-
-function message(t){$('message').textContent=t}
-
+const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
+const initData=tg?.initData||'';const $=id=>document.getElementById(id);
+let me=null,products=[];
+function say(t){$('msg').textContent=t}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-
 function money(n){return Number(n).toLocaleString('uz-UZ')+' so‘m'}
-
-async function api(url,options={}){
-
- const r=await fetch(url,{...options,headers:{
-
-  'Content-Type':'application/json',
-
-  'X-Telegram-Init-Data':initData,
-
-  ...(options.headers||{})
-
- }});
-
+async function api(url,opt={}){
+ const r=await fetch(url,{...opt,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData,...(opt.headers||{})}});
  const d=await r.json().catch(()=>({}));
-
- if(!r.ok)throw Error(d.error||'Xatolik: '+r.status);
-
- return d;
-
+ if(!r.ok)throw Error(d.error||'Xatolik '+r.status);return d;
 }
-
 async function start(){
-
- if(!initData){
-
-  message('Telegram bot ichidagi Ilovani ochish tugmasidan kiring.');
-
-  $('catalog').innerHTML='<div class="card">Ilovadan Telegram orqali foydalaning.</div>';
-
-  return;
-
- }
-
+ if(!initData){say('Ilovani Telegram bot ichidan oching.');return}
+ try{me=await api('/api/me');await catalog()}catch(e){say(e.message)}
+}
+async function catalog(){
  try{
-
-  me=await api('/api/me');
-
-  if(me.admin)$('adminButton').classList.remove('hidden');
-
-  await loadCatalog();
-
- }catch(e){message(e.message)}
-
+ const d=await api('/api/catalog');products=d.products||[];
+ $('catalog').innerHTML=products.length?products.map(p=>`<div class="card">${p.image?`<img src="${esc(p.image)}">`:''}<h2>${esc(p.name)}</h2><p class="price">${money(p.price)}</p><p>Omborda: ${p.stock}</p>${p.stock>0?`<label>Muddat</label><select id="m${p.id}">${[3,6,12,18,24].map(n=>`<option>${n}</option>`).join('')}</select><label>Boshlang‘ich to‘lov</label><input id="d${p.id}" type="number" min="0" value="0"><button onclick="apply(${p.id})">Ariza berish</button>`:'Mavjud emas'}</div>`).join(''):'<div class="card">Telefonlar hali qo‘shilmagan.</div>';
+ }catch(e){say(e.message)}
 }
-
-async function loadCatalog(){
-
- try{
-
-  const d=await api('/api/catalog');
-
-  products=d.products||[];markup=Number(d.markup||0);
-
-  $('catalog').innerHTML=products.length?products.map(p=>`
-
-   <div class="card">
-
-   ${p.image?`<img src="${esc(p.image)}" alt="Telefon">`:''}
-
-   <h2>${esc(p.name)}</h2><div class="price">${money(p.price)}</div>
-
-   <p class="muted">Omborda: ${p.stock} dona</p>
-
-   ${p.stock>0?`
-
-    <label>Nasiya muddati</label>
-
-    <select id="months${p.id}">${[3,6,12,18,24].map(m=>`<option value="${m}">${m} oy</option>`).join('')}</select>
-
-    <label>Boshlang‘ich to‘lov (so‘m)</label>
-
-    <input id="down${p.id}" type="number" min="0" max="${p.price}" value="0">
-
-    <button onclick="applyFor(${p.id})">Ariza berish</button>`:'<p>Hozircha mavjud emas</p>'}
-
-   </div>`).join(''):'<div class="card">Mahsulot yo‘q. Admin paneldan telefon qo‘shing.</div>';
-
- }catch(e){message(e.message)}
-
+async function apply(id){
+ try{let customer=prompt('Ism-familiya:');if(!customer)return;let phone=prompt('Telefon raqami:');if(!phone)return;
+ let d=await api('/api/applications',{method:'POST',body:JSON.stringify({customer,phone,product_id:id,months:Number($('m'+id).value),down:Number($('d'+id).value||0)})});say('Ariza yuborildi: #'+d.id)
+ }catch(e){say(e.message)}
 }
-
-async function applyFor(id){
-
- try{
-
-  const customer=prompt('Ism-familiyangiz:');if(!customer)return;
-
-  const phone=prompt('Telefon raqamingiz:');if(!phone)return;
-
-  const months=Number($('months'+id).value);
-
-  const down=Number($('down'+id).value||0);
-
-  const d=await api('/api/applications',{method:'POST',body:JSON.stringify({customer,phone,product_id:id,months,down})});
-
-  message('Arizangiz yuborildi. Raqami: '+d.id);
-
- }catch(e){message(e.message)}
-
-}
-
-function showSection(s){
-
- $('catalog').classList.toggle('hidden',s!=='catalog');
-
- $('mine').classList.toggle('hidden',s!=='mine');
-
- if(s==='mine')loadMine();
-
-}
-
-async function loadMine(){
-
- try{
-
-  const list=await api('/api/applications/mine');
-
-  $('mine').innerHTML=list.length?list.map(a=>`
-
-   <div class="card"><b>${esc(a.product||'Telefon')}</b>
-
-   <p>${a.months} oy · Boshlang‘ich: ${money(a.down)}</p>
-
-   <p>Holat: ${esc(a.status)}</p></div>`).join(''):'<div class="card">Arizalar yo‘q.</div>';
-
- }catch(e){message(e.message)}
-
-}
-
-$('adminButton').onclick=async()=>{
-
- if(!me?.admin){message('Admin ruxsati yo‘q');return}
-
- $('shop').classList.add('hidden');$('admin').classList.remove('hidden');
-
- await loadAdmin();
-
-};
-
-function backShop(){
-
- $('admin').classList.add('hidden');$('shop').classList.remove('hidden');loadCatalog();
-
-}
-
-function adminSection(s){
-
- ['add','stock','apps','settings'].forEach(id=>$(id).classList.toggle('hidden',id!==s));
-
-}
-
+function tab(t){$('catalog').classList.toggle('hidden',t!=='catalog');$('mine').classList.toggle('hidden',t!=='mine');if(t==='mine')mine()}
+async function mine(){try{let a=await api('/api/applications/mine');$('mine').innerHTML=a.map(x=>`<div class="card">${esc(x.product)} · ${x.months} oy<br>Holat: ${esc(x.status)}</div>`).join('')||'Arizalar yo‘q'}catch(e){say(e.message)}}
+function atab(t){['add','stock','apps','settings'].forEach(x=>$(x).classList.toggle('hidden',x!==t))}
+$('admin') // admin panel faqat admin uchun ochiladi
 async function loadAdmin(){
-
- try{
-
-  const d=await api('/api/admin');
-
-  products=d.products||[];markup=d.markup;
-
-  $('markup').value=markup;
-
-  renderStock(products);renderApps(d.applications||[]);
-
- }catch(e){message(e.message)}
-
+ if(!me?.admin){say('Admin ruxsati yo‘q');return}
+ try{let d=await api('/api/admin');products=d.products||[];$('mk').value=d.markup;renderStock(d.products);renderApps(d.applications)}
+ catch(e){say(e.message)}
 }
-
-async function addProduct(){
-
- try{
-
-  await api('/api/admin/products',{method:'POST',body:JSON.stringify({
-
-   name:$('pname').value.trim(),price:Number($('pprice').value),
-
-   stock:Number($('pstock').value),image:$('pimage').value.trim()
-
-  })});
-
-  $('pname').value='';$('pprice').value='';$('pstock').value='1';$('pimage').value='';
-
-  message('Telefon qo‘shildi!');
-
-  await loadAdmin();adminSection('stock');
-
- }catch(e){message(e.message)}
-
-}
-
-function renderStock(list){
-
- $('stock').innerHTML='<h2>📦 Ombor</h2>'+(list.length?list.map(p=>`
-
- <div class="card">
-
- <b>${esc(p.name)}</b><p class="muted">ID: ${p.id}</p>
-
- <label>Nomi</label><input id="name${p.id}" value="${esc(p.name)}">
-
- <label>Narxi</label><input id="price${p.id}" type="number" value="${p.price}">
-
- <label>Soni</label><input id="qty${p.id}" type="number" value="${p.stock}">
-
- <label>Holati</label><select id="active${p.id}">
-
- <option value="1" ${p.active?'selected':''}>Faol</option>
-
- <option value="0" ${!p.active?'selected':''}>Yashirilgan</option></select>
-
- <button onclick="updateProduct(${p.id})">Saqlash</button>
-
- </div>`).join(''):'<div class="card">Mahsulot yo‘q.</div>');
-
-}
-
-async function updateProduct(id){
-
- try{
-
-  await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({
-
-   name:$('name'+id).value,price:Number($('price'+id).value),
-
-   stock:Number($('qty'+id).value),active:Number($('active'+id).value)
-
-  })});
-
-  message('Mahsulot yangilandi');await loadAdmin();
-
- }catch(e){message(e.message)}
-
-}
-
-function renderApps(list){
-
- $('apps').innerHTML='<h2>📋 Nasiya arizalari</h2>'+(list.length?list.map(a=>`
-
- <div class="card">
-
- <b>#${a.id} — ${esc(a.customer)}</b>
-
- <p>${esc(a.product||'Telefon')} · ${a.months} oy</p>
-
- <p>Telefon: ${esc(a.phone)}</p>
-
- <p>Boshlang‘ich to‘lov: ${money(a.down)}</p>
-
- <p>Telegram ID: ${esc(a.telegram_id)}</p>
-
- <p>Holat: ${esc(a.status)}</p>
-
- <label>Ariza holati</label>
-
- <select id="status${a.id}">
-
- ${[['new','Yangi'],['review','Ko‘rib chiqilmoqda'],['approved','Tasdiqlandi'],['rejected','Rad etildi']].map(([v,t])=>`<option value="${v}" ${a.status===v?'selected':''}>${t}</option>`).join('')}
-
- </select>
-
- <button onclick="updateApp(${a.id})">Holatni saqlash</button>
-
- </div>`).join(''):'<div class="card">Arizalar yo‘q.</div>');
-
-}
-
-async function updateApp(id){
-
- try{
-
-  await api('/api/admin/applications/'+id,{method:'PATCH',body:JSON.stringify({status:$('status'+id).value})});
-
-  message('Ariza holati yangilandi');await loadAdmin();
-
-  adminSection('apps');
-
- }catch(e){message(e.message)}
-
-}
-
-async function saveMarkup(){
-
- try{
-
-  await api('/api/admin/settings',{method:'POST',body:JSON.stringify({markup:Number($('markup').value)})});
-
-  message('Ustama saqlandi');
-
- }catch(e){message(e.message)}
-
-}
-
-start();
-
+function renderStock(a){$('stock').innerHTML='<h2>Ombor</h2>'+(a||[]).map(p=>`<div class="card"><b>${esc(p.name)}</b><label>Nomi</label><input id="n${p.id}" value="${esc(p.name)}"><label>Narxi</label><input id="v${p.id}" type="number" value="${p.price}"><label>Soni</label><input id="s${p.id}" type="number" value="${p.stock}"><label>Holati</label><select id="a${p.id}"><option value="1" ${p.active?'selected':''}>Faol</option><option value="0" ${!p.active?'selected':''}>Yashirilgan</option></select><button onclick="updateProduct(${p.id})">Saqlash</button></div>`).join('')}
+function renderApps(a){$('apps').innerHTML='<h2>Nasiya arizalari</h2>'+(a||[]).map(x=>`<div class="card"><b>#${x.id} ${esc(x.customer)}</b><p>${esc(x.product)} · ${x.months} oy</p><p>Tel: ${esc(x.phone)}</p><p>Holat: ${esc(x.status)}</p><select id="st${x.id}">${[['new','Yangi'],['review','Ko‘rib chiqilmoqda'],['approved','Tasdiqlandi'],['rejected','Rad etildi']].map(([v,t])=>`<option value="${v}" ${x.status===v?'selected':''}>${t}</option>`).join('')}</select><button onclick="updateApp(${x.id})">Holatni saqlash</button></div>`).join('')}
+async function addProduct(){try{await api('/api/admin/products',{method:'POST',body:JSON.stringify({name:$('pn').value,price:Number($('pp').value),stock:Number($('ps').value),image:$('pi').value})});say('Telefon qo‘shildi');await loadAdmin();atab('stock')}catch(e){say(e.message)}}
+async function updateProduct(id){try{await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:$('n'+id).value,price:Number($('v'+id).value),stock:Number($('s'+id).value),active:Number($('a'+id).value)})});say('Mahsulot saqlandi');await loadAdmin()}catch(e){say(e.message)}}
+async function updateApp(id){try{await api('/api/admin/applications/'+id,{method:'PATCH',body:JSON.stringify({status:$('st'+id).value})});say('Ariza yangilandi');await loadAdmin();atab('apps')}catch(e){say(e.message)}}
+async function saveMarkup(){try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({markup:Number($('mk').value)})});say('Ustama saqlandi')}catch(e){say(e.message)}}
+function back(){$('admin').classList.add('hidden');$('shop').classList.remove('hidden');catalog()}
+const adminButton=document.createElement('button');adminButton.textContent='⚙️ Admin';adminButton.className='secondary hidden';adminButton.id='adminButton';document.querySelector('body').insertBefore(adminButton,$('msg'));
+adminButton.onclick=async()=>{if(!me?.admin){say('Admin ruxsati yo‘q');return}$('shop').classList.add('hidden');$('admin').classList.remove('hidden');await loadAdmin()};
+const oldStart=start;
+async function boot(){await oldStart();if(me?.admin)adminButton.classList.remove('hidden')}
+boot();
 </script>
-
 </body>
-
 </html>

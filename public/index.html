@@ -4,7 +4,7 @@
 *{box-sizing:border-box}body{margin:0;padding:16px;background:#0d1329;color:#f7f8ff;font-family:Arial;max-width:760px;margin-inline:auto}h1{font-size:25px}.card{background:#192641;border:1px solid #2a3854;border-radius:18px;padding:16px;margin:12px 0}button,input,select{font:inherit;border-radius:11px;padding:12px}button{border:0;background:#ff962d;color:#20162b;font-weight:bold}input,select{width:100%;margin:6px 0 12px;background:#101a30;color:white;border:1px solid #40506c}nav{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}nav button{flex:1}.secondary{background:#34435e;color:white}.hidden{display:none!important}.price{color:#ffbd71;font-size:20px;font-weight:bold}#msg{padding:8px 0;color:#ffc078;overflow-wrap:anywhere;white-space:pre-wrap}.muted{color:#b8c4da;font-size:14px}img{max-width:100%;max-height:200px;object-fit:contain}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}label{font-size:13px;color:#c8d3e6}
 </style></head><body>
 <h1>🍊 Mandarin Nasiya</h1><div id="msg"></div>
-<section id="shop"><div class="card"><h2>Telefonlar nasiyaga!</h2>Telefon tanlang, oylik to‘lovni hisoblang va ariza qoldiring.<p>3, 6, 12, 18 yoki 24 oy.</p></div><nav><button onclick="shopTab('catalog')">📱 Telefonlar</button><button class="secondary" onclick="shopTab('mine')">📋 Arizalarim</button><button class="secondary" onclick="openAdmin()">⚙️ Admin panel</button></nav><div id="catalog"></div><div id="mine" class="hidden"></div></section>
+<section id="shop"><div class="card"><h2>Telefonlar nasiyaga!</h2>Telefon tanlang, oylik to‘lovni hisoblang va ariza qoldiring.<p>3, 6, 12, 18 yoki 24 oy.</p></div><nav><button onclick="shopTab('catalog')">📱 Telefonlar</button><button class="secondary" onclick="shopTab('mine')">📋 Arizalarim</button><button id="adminNavBtn" class="secondary hidden" onclick="openAdmin()">⚙️ Admin panel</button></nav><div id="catalog"></div><div id="applicationForm" class="card hidden"><h2>📝 Ariza qoldirish</h2><p id="selectedProduct"></p><form id="applyForm"><label>Ism-familiya</label><input id="customer" maxlength="100" required placeholder="Ism va familiya"><label>Telefon raqami</label><input id="phone" type="tel" required minlength="9" maxlength="20" placeholder="+998 90 123 45 67"><label>Muddat</label><select id="applyMonths"><option value="3">3 oy</option><option value="6">6 oy</option><option value="12">12 oy</option><option value="18">18 oy</option><option value="24">24 oy</option></select><label>Boshlang‘ich to‘lov (so‘m)</label><input id="applyDown" type="number" min="0" value="0" required><button type="submit">Arizani yuborish</button><button type="button" class="secondary" onclick="cancelApplication()">Bekor qilish</button></form></div><div id="mine" class="hidden"></div></section>
 <section id="login" class="hidden"><div class="card"><h2>🔐 Admin kirish</h2><label>Admin paroli</label><input id="password" type="password" placeholder="Render’dagi ADMIN_PASSWORD"><button onclick="login()">Kirish</button><button class="secondary" onclick="back()">Orqaga</button></div></section>
 <section id="admin" class="hidden"><button class="secondary" onclick="logout()">Chiqish</button><h2>⚙️ Admin panel</h2><nav><button onclick="aTab('add')">➕ Telefon qo‘shish</button><button class="secondary" onclick="aTab('stock')">📦 Ombor</button><button class="secondary" onclick="aTab('apps')">📋 Arizalar</button><button class="secondary" onclick="aTab('settings')">💰 Ustama</button></nav>
 <div id="add" class="card"><h2>Telefon qo‘shish</h2><label>Model</label><input id="pn" placeholder="iPhone 15 Pro"><label>Narxi (so‘m)</label><input id="pp" type="number" min="1"><label>Ombor soni</label><input id="ps" type="number" min="0" value="1"><label>Rasm URL (ixtiyoriy)</label><input id="pi" placeholder="https://..."><button onclick="addProduct()">Saqlash</button></div><div id="stock" class="hidden"></div><div id="apps" class="hidden"></div><div id="settings" class="card hidden"><h2>Nasiya ustamasi (%)</h2><input id="mk" type="number" min="0" max="300"><button onclick="saveMarkup()">Saqlash</button></div></section>
@@ -14,7 +14,38 @@ function say(t){$('msg').textContent=t||''}function esc(v){return String(v==null
 async function api(url,opt){opt=opt||{};var headers={'Content-Type':'application/json','X-Telegram-Init-Data':initData};if(token)headers.Authorization='Bearer '+token;Object.assign(headers,opt.headers||{});var r=await fetch(url,Object.assign({},opt,{headers:headers}));var d=await r.json().catch(function(){return {}});if(!r.ok){if(r.status===401&&token){token='';sessionStorage.removeItem('mandarinAdminToken')}throw Error(d.error||('Xatolik '+r.status))}return d}
 async function catalog(){try{var d=await api('/api/catalog');markup=Number(d.markup||0);var a=d.products||[];if(!a.length){$('catalog').innerHTML='<div class="card">Telefonlar hali qo‘shilmagan. Admin paneldan mahsulot qo‘shing.</div>';return}var html='<div class="grid">';a.forEach(function(p){html+='<div class="card">'+(p.image?'<img loading="lazy" src="'+esc(p.image)+'" onerror="this.hidden=true">':'')+'<h2>'+esc(p.name)+'</h2><p class="price">'+money(p.price)+'</p><p>Omborda: '+p.stock+'</p>';if(p.stock>0){html+='<label>Muddat</label><select id="m'+p.id+'" onchange="calc('+p.id+','+p.price+')"><option>3</option><option>6</option><option>12</option><option>18</option><option>24</option></select><label>Boshlang‘ich to‘lov</label><input id="d'+p.id+'" type="number" min="0" max="'+p.price+'" value="0" oninput="calc('+p.id+','+p.price+')"><p id="c'+p.id+'"></p><button onclick="applyFor('+p.id+')">Ariza qoldirish</button>'}else html+='<p>Hozir mavjud emas</p>';html+='</div>'});$('catalog').innerHTML=html+'</div>';a.forEach(function(p){if(p.stock>0)calc(p.id,p.price)})}catch(e){say(e.message)}}
 function calc(id,price){var m=Number($('m'+id).value||3),down=Math.max(0,Number($('d'+id).value||0)),total=Math.round(price*(1+markup/100));$('c'+id).textContent='Ustama bilan: '+money(total)+' · Oyiga: '+money(Math.ceil(Math.max(0,total-down)/m))}
-async function applyFor(id){if(!initData){say('Ariza yuborish uchun Telegram bot ichidan oching.');return}var customer=prompt('Ism-familiya:');if(!customer)return;var phone=prompt('Telefon raqami:');if(!phone)return;try{var d=await api('/api/applications',{method:'POST',body:JSON.stringify({customer:customer,phone:phone,product_id:id,months:Number($('m'+id).value),down:Number($('d'+id).value||0)})});say('Ariza qabul qilindi. Raqami: #'+d.id);shopTab('mine')}catch(e){say(e.message)}}
+var selectedProductId=null;
+function applyFor(id){
+ if(!initData){say('Ariza yuborish uchun Telegram bot ichidan ilovani oching.');return}
+ var p=null;
+ // Read the product name and price from the currently rendered catalog.
+ api('/api/catalog').then(function(d){
+  p=(d.products||[]).find(function(x){return Number(x.id)===Number(id)});
+  if(!p){say('Telefon topilmadi. Sahifani yangilang.');return}
+  selectedProductId=Number(id);
+  $('selectedProduct').textContent=p.name+' — '+money(p.price);
+  $('applyDown').max=String(p.price);
+  $('applyDown').value='0';
+  $('applyMonths').value=$('m'+id).value||'3';
+  $('applicationForm').classList.remove('hidden');
+  $('applicationForm').scrollIntoView({behavior:'smooth',block:'start'});
+  say('');
+ }).catch(function(e){say(e.message)});
+}
+function cancelApplication(){selectedProductId=null;$('applicationForm').classList.add('hidden');$('applyForm').reset();$('applyDown').value='0'}
+$('applyForm').addEventListener('submit',async function(ev){
+ ev.preventDefault();
+ if(!selectedProductId){say('Avval telefon tanlang.');return}
+ var customer=$('customer').value.trim(),phone=$('phone').value.trim(),down=Number($('applyDown').value||0);
+ if(customer.length<2||!/^[+\\d\\s()-]{9,20}$/.test(phone)){say('Ism yoki telefon raqamini tekshiring.');return}
+ var btn=$('applyForm').querySelector('button[type="submit"]');btn.disabled=true;btn.textContent='Yuborilmoqda…';
+ try{
+  var d=await api('/api/applications',{method:'POST',body:JSON.stringify({customer:customer,phone:phone,product_id:selectedProductId,months:Number($('applyMonths').value),down:down})});
+  say('Arizangiz qabul qilindi! Raqami: #'+d.id);
+  cancelApplication();await shopTab('mine');
+ }catch(e){say(e.message)}
+ finally{btn.disabled=false;btn.textContent='Arizani yuborish'}
+});
 async function shopTab(t){$('catalog').classList.toggle('hidden',t!=='catalog');$('mine').classList.toggle('hidden',t!=='mine');if(t==='mine'){if(!initData){say('Arizalarni Telegram ichidan ko‘ring.');return}try{var a=await api('/api/applications/mine');$('mine').innerHTML=a.length?a.map(function(x){return '<div class="card"><b>#'+x.id+' '+esc(x.product)+'</b><p>'+x.months+' oy · '+money(x.down)+'</p><p>Holat: '+esc(x.status)+'</p></div>'}).join(''):'<div class="card">Arizalar yo‘q.</div>'}catch(e){say(e.message)}}}
 function openAdmin(){$('shop').classList.add('hidden');$('admin').classList.add('hidden');$('login').classList.remove('hidden');say('');if(token)enterAdmin()}
 async function login(){try{var d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('password').value})});token=d.token;sessionStorage.setItem('mandarinAdminToken',token);$('password').value='';await enterAdmin()}catch(e){say(e.message)}}
@@ -27,5 +58,5 @@ async function addProduct(){try{await api('/api/admin/products',{method:'POST',b
 async function updateProduct(id){try{await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:$('n'+id).value,price:Number($('v'+id).value),stock:Number($('s'+id).value),active:Number($('a'+id).value)})});say('Mahsulot saqlandi.');await refresh('stock');catalog()}catch(e){say(e.message)}}
 async function updateApp(id){try{await api('/api/admin/applications/'+id,{method:'PATCH',body:JSON.stringify({status:$('st'+id).value})});say('Ariza yangilandi.');await refresh('apps')}catch(e){say(e.message)}}
 async function saveMarkup(){try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({markup:Number($('mk').value)})});markup=Number($('mk').value);say('Ustama saqlandi.');catalog()}catch(e){say(e.message)}}
-async function boot(){await catalog();if(token)enterAdmin()}boot();
+async function boot(){await catalog();if(initData){try{var me=await api('/api/me');if(me.admin)$('adminNavBtn').classList.remove('hidden')}catch(e){}}if(token)enterAdmin()}boot();
 </script></body></html>

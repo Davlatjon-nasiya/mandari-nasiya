@@ -1,4 +1,3 @@
-
 {
   "name": "mandarin-nasiya-miniapp",
   "version": "1.0.0",
@@ -9,7 +8,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "node-telegram-bot-api": "^0.66.0",
-    "better-sqlite3": "^11.8.1"
+    "better-sqlite3": "^12.0.0"
   },
   "engines": {
     "node": "22.x"

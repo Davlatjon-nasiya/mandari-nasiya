@@ -57,6 +57,7 @@ if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting(
 
 const TERMS = [3, 6, 12, 18, 24];
 const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}')); if (o[m] !== undefined && Number.isFinite(Number(o[m]))) return Number(o[m]); } catch (_) {} return Number(getSetting('markup', '50')); };
+const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
 const markupsMap = () => Object.fromEntries(TERMS.map(t => [t, markupFor(t)]));
 const shape = p => { let im = []; try { im = JSON.parse(p.images || '[]'); } catch (_) {} if (!im.length && p.image) im = [p.image]; return { ...p, images: im }; };
 const dataKey = crypto.createHash('sha256').update(process.env.DATA_KEY || ('mandarin|' + (process.env.BOT_TOKEN || 'local'))).digest();
@@ -188,7 +189,7 @@ app.get('/api/catalog', (_, res) => {
     markup: Number(getSetting('markup', '50')),
     terms: TERMS,
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
-    promo: getSetting('promo')
+    promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') }
   });
 });
 
@@ -247,7 +248,7 @@ app.get('/api/admin', auth, admin, (req, res) => {
     applications: db.prepare('SELECT a.*,p.name AS product FROM applications a LEFT JOIN products p ON a.product_id=p.id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc) })),
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
-    promo: getSetting('promo'),
+    promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
     stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
   });
 });
@@ -334,11 +335,17 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
     for (const t of TERMS) { const v = Number((b.markups || {})[t]); if (!Number.isFinite(v) || v < 0 || v > 300) return res.status(400).json({ error: 'Har bir muddat ustamasi 0–300% bo‘lsin.' }); o[t] = v; }
     setSetting('markups', JSON.stringify(o));
   }
+  if (b.banners !== undefined) {
+    const arr = Array.isArray(b.banners) ? b.banners.slice(0, 6) : null;
+    if (!arr || !arr.every(x => x && validImage(String(x.img || '')) && (!x.link || (/^https:\/\/\S+$/i.test(String(x.link)) && String(x.link).length <= 300))))
+      return res.status(400).json({ error: 'Banner rasmi yoki havolasi noto‘g‘ri.' });
+    setSetting('banners', JSON.stringify(arr.map(x => ({ img: String(x.img), link: String(x.link || '') }))));
+  }
   const text = (k, max) => { if (b[k] !== undefined) setSetting(k, String(b[k]).trim().slice(0, max)); };
   if (b.contact_telegram !== undefined && !/^@?[A-Za-z0-9_]{0,32}$/.test(String(b.contact_telegram).trim()))
     return res.status(400).json({ error: 'Telegram username noto‘g‘ri (masalan @mandarin_nasiya).' });
   if (b.contact_instagram !== undefined && !/^@?[A-Za-z0-9_.]{0,31}$/.test(String(b.contact_instagram).trim())) return res.status(400).json({ error: 'Instagram username noto‘g‘ri (masalan @mandarin_nasiya).' });
-  text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200);
+  text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200); text('info_installment', 1500); text('info_delivery', 1500); text('info_about', 1500);
   res.json({ ok: true });
 });
 

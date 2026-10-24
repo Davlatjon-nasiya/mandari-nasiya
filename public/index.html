@@ -116,8 +116,7 @@ $('sh').innerHTML='<div class="row" style="align-items:center"><h2 style="flex:1
 (p.stock>0?'<div class="row" id="pt" style="margin-top:10px"><button onclick="chooseType(\'cash\')">💵 Naxtga olish</button><button onclick="chooseType(\'installment\')">💳 Nasiyaga olish</button></div>'+
 '<div id="pf1" class="hidden card"><h2>💵 Naxt to‘lov</h2><div class="res">'+money(p.price)+'</div><label>Ism-familiya</label><input id="n1" maxlength="100"><label>Telefon raqamingiz</label><input id="p1" type="tel" placeholder="+998 90 123 45 67"><button id="b1" style="width:100%" onclick="submitApp(\'cash\')">📝 Buyurtma berish</button></div>'+
 '<div id="pf2" class="hidden card"><h2>💳 Nasiyaga olish</h2><label>Muddatni tanlang</label><div class="chips" id="chips"></div><label>Boshlang‘ich to‘lov (so‘m)</label><input id="sd" type="number" min="0" value="0" oninput="updP()"><div class="res" id="sr"></div><details><summary>📅 To‘lov jadvali</summary><div id="ss"></div></details>'+
-'<label>Ism-familiya</label><input id="n2" maxlength="100"><label>Telefon raqamingiz</label><input id="p2" type="tel" placeholder="+998 90 123 45 67"><label>Pasport seriya va raqami</label><input id="pp" maxlength="10" placeholder="AA1234567" autocomplete="off" style="text-transform:uppercase"><label>Plastik karta raqami (16 xona)</label><input id="cn" inputmode="numeric" maxlength="19" placeholder="8600 0000 0000 0000" autocomplete="off"><label>Kartaga ulangan telefon raqami</label><input id="cph" type="tel" placeholder="+998 90 123 45 67">'+
-'<p class="muted">🔒 Ma’lumotlar shifrlangan holda saqlanadi. CVV, amal qilish muddati, PIN va SMS kodni so‘ramaymiz — hech kimga bermang.</p><label style="display:flex;gap:8px;align-items:flex-start"><input id="ck" type="checkbox" style="width:auto;margin:3px 0">Shaxsiy ma’lumotlarimni nasiya arizasini ko‘rib chiqish uchun qayta ishlashga roziman</label><button id="b2" style="width:100%" onclick="submitApp(\'installment\')">📝 Nasiya arizasini yuborish</button></div>':'<div class="card">Hozir mavjud emas</div>')+quick();
+'<label>Ism-familiya</label><input id="n2" maxlength="100"><label>Telefon raqamingiz</label><input id="p2" type="tel" placeholder="+998 90 123 45 67"><button id="b2" style="width:100%" onclick="submitApp(\'installment\')">📝 Nasiya arizasini yuborish</button></div>':'<div class="card">Hozir mavjud emas</div>')+quick();
 updP();$('ov').classList.remove('hidden');document.body.style.overflow='hidden'}
 function closeP(){$('ov').classList.add('hidden');document.body.style.overflow='';sel=null}
 function gsc(){var g=$('gal');if(g&&$('dots')&&sel.p.images.length>1)$('dots').textContent=(Math.round(g.scrollLeft/g.clientWidth)+1)+' / '+sel.p.images.length}
@@ -126,16 +125,11 @@ function updP(){if(!$('sd'))return;var p=sel.p,down=Math.min(p.price-1,Math.max(
 $('chips').innerHTML=TERMS.map(function(t){return '<button class="chip'+(sel.m===t?' on':'')+'" onclick="setM('+t+')">'+t+' oy<small>'+money(pay(p.price,down,t).monthly)+'</small></button>'}).join('');
 var r=pay(p.price,down,sel.m);$('sr').innerHTML='Oyiga: '+money(r.monthly)+'<div class="muted">Jami: '+money(r.total+down)+' (ustama '+mk(sel.m)+'%)</div>';$('ss').innerHTML=sched(p.price,down,sel.m)}
 function chooseType(t){hap();$('pt').classList.add('hidden');var f=$(t==='cash'?'pf1':'pf2');f.classList.remove('hidden');f.scrollIntoView({behavior:'smooth'})}
-function luhn(s){var x=0,a=false;for(var i=s.length-1;i>=0;i--){var d=+s[i];if(a){d*=2;if(d>9)d-=9}x+=d;a=!a}return x%10===0}
 async function submitApp(t){
 if(!initData){say('Telegram ma’lumoti topilmadi. Ilovani bot ichidagi “📱 Ilovani ochish” tugmasi yoki “📱 Ilova” menyu tugmasi orqali oching.');closeP();return}
 var c=t==='cash',b={product_id:sel.p.id,pay_type:t,customer:$(c?'n1':'n2').value.trim(),phone:$(c?'p1':'p2').value.trim()};
 if(b.customer.length<2){alert('Ism-familiyani kiriting');return}if(!PHONE_RE.test(b.phone)){alert('Telefon raqamini tekshiring. Masalan: +998 90 123 45 67');return}
-if(!c){b.months=sel.m;b.down=sel.down;b.passport=$('pp').value.replace(/\s/g,'').toUpperCase();b.card=$('cn').value.replace(/\D/g,'');b.card_phone=$('cph').value.trim();b.consent=$('ck').checked;
-if(!/^[A-Z]{2}\d{7}$/.test(b.passport)){alert('Pasport seriya va raqamini kiriting. Masalan: AA1234567');return}
-if(b.card.length!==16||!luhn(b.card)){alert('Karta raqami (16 xona) noto‘g‘ri.');return}
-if(!PHONE_RE.test(b.card_phone)){alert('Kartaga ulangan telefon raqamini kiriting.');return}
-if(!b.consent){alert('Ma’lumotlarni qayta ishlashga rozilik bering.');return}}
+if(!c){b.months=sel.m;b.down=sel.down}
 var btn=$(c?'b1':'b2'),old=btn.textContent;btn.disabled=true;btn.textContent='Yuborilmoqda…';
 try{var d=await api('/api/applications',{method:'POST',body:JSON.stringify(b)});closeP();confetti();tab('mine',$('nav').children[2]);say('✅ Arizangiz qabul qilindi! Raqami: #'+d.id)}
 catch(e){alert(e.message);btn.disabled=false;btn.textContent=old}}

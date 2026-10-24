@@ -47,7 +47,12 @@ if (!prodCols.includes('images')) db.exec("ALTER TABLE products ADD COLUMN image
 if (!appCols.includes('total')) db.exec('ALTER TABLE applications ADD COLUMN total INTEGER NOT NULL DEFAULT 0');
 if (!appCols.includes('monthly')) db.exec('ALTER TABLE applications ADD COLUMN monthly INTEGER NOT NULL DEFAULT 0');
 db.exec('CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
-for (const [c, d] of [['pay_type', "'installment'"], ['passport_enc', "''"], ['card_enc', "''"], ['card_last4', "''"], ['card_phone', "''"], ['consent_at', "''"]])
+db.exec(`
+CREATE TABLE IF NOT EXISTS users(telegram_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', last_remind TEXT NOT NULL DEFAULT '', blocked INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS favorites(telegram_id TEXT NOT NULL, product_id INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(telegram_id, product_id));
+CREATE TABLE IF NOT EXISTS support_msgs(admin_chat TEXT NOT NULL, admin_msg INTEGER NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY(admin_chat, admin_msg));
+`);
+for (const [c, d] of [['pay_type', "'installment'"], ['passport_enc', "''"], ['card_enc', "''"], ['card_last4', "''"], ['card_phone', "''"], ['consent_at', "''"], ['approved_at', "''"], ['last_pay_remind', "''"]])
   if (!appCols.includes(c)) db.exec('ALTER TABLE applications ADD COLUMN ' + c + ' TEXT NOT NULL DEFAULT ' + d);
 if (!appCols.includes('note')) db.exec("ALTER TABLE applications ADD COLUMN note TEXT NOT NULL DEFAULT ''");
 db.exec("UPDATE applications SET passport_enc='', card_enc='', card_last4='', card_phone='' WHERE passport_enc!='' OR card_enc!=''"); // pasport/karta ma’lumotlari endi yig‘ilmaydi — eskilari o‘chiriladi
@@ -111,7 +116,11 @@ function validWebAdmin(token) {
 const bearerOf = req => (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
 function auth(req, res, next) {
   const user = verifyTelegram(req.get('X-Telegram-Init-Data'));
-  if (user) { req.user = user; req.authType = 'telegram'; return next(); }
+  if (user) {
+    req.user = user; req.authType = 'telegram';
+    try { db.prepare('INSERT INTO users(telegram_id,name,username) VALUES(?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET name=excluded.name, username=excluded.username').run(String(user.id), String(user.first_name || '').slice(0, 80), String(user.username || '').slice(0, 40)); } catch (_) {}
+    return next();
+  }
   if (validWebAdmin(bearerOf(req))) { req.user = { id: 'web-admin' }; req.authType = 'web'; return next(); }
   return res.status(401).json({ error: 'Telegram ichidan oching yoki admin sifatida kiring.' });
 }
@@ -131,12 +140,17 @@ function loginLimit(req, res, next) {
 }
 
 /* ---------- Telegram bot (xabarnomalar uchun) ---------- */
-let bot = null;
+let bot = null, botUser = '';
 const notify = (chatId, text) => { if (bot && chatId && /^\d+$/.test(String(chatId))) bot.sendMessage(chatId, text).catch(e => console.error('Notify:', e.message)); };
 const money = n => Number(n).toLocaleString('ru-RU') + ' so‘m';
 
+async function sendUser(id, text, markup) {
+  try { await bot.sendMessage(id, text, markup ? { reply_markup: markup } : {}); return true; }
+  catch (e) { if (/403|blocked|deactivated|chat not found/i.test(e.message)) db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(String(id)); return false; }
+}
+const appBtn = () => ({ inline_keyboard: [[{ text: '📱 Ilovani ochish', web_app: { url: process.env.WEBAPP_URL } }]] });
 /* ---------- Zaxira nusxa (Telegram orqali saqlash va tiklash) ---------- */
-const makeBackup = () => JSON.stringify({ v: 1, at: new Date().toISOString(), products: db.prepare('SELECT * FROM products').all(), applications: db.prepare('SELECT * FROM applications').all(), settings: db.prepare('SELECT * FROM settings').all(), images: db.prepare('SELECT * FROM images').all() });
+const makeBackup = () => JSON.stringify({ v: 1, at: new Date().toISOString(), products: db.prepare('SELECT * FROM products').all(), applications: db.prepare('SELECT * FROM applications').all(), settings: db.prepare('SELECT * FROM settings').all(), images: db.prepare('SELECT * FROM images').all(), users: db.prepare('SELECT * FROM users').all(), favorites: db.prepare('SELECT * FROM favorites').all() });
 const insertRows = (table, rows) => {
   const cols = db.prepare('PRAGMA table_info(' + table + ')').all().map(c => c.name);
   for (const r of rows) {
@@ -146,8 +160,8 @@ const insertRows = (table, rows) => {
 };
 const restoreBackup = db.transaction(data => {
   if (!data || !Array.isArray(data.products) || !Array.isArray(data.applications) || !Array.isArray(data.settings)) throw new Error('Zaxira fayli noto‘g‘ri.');
-  db.exec('DELETE FROM applications; DELETE FROM products; DELETE FROM settings; DELETE FROM images;');
-  insertRows('products', data.products); insertRows('applications', data.applications); insertRows('settings', data.settings); insertRows('images', data.images || []);
+  db.exec('DELETE FROM applications; DELETE FROM products; DELETE FROM settings; DELETE FROM images; DELETE FROM users; DELETE FROM favorites;');
+  insertRows('products', data.products); insertRows('applications', data.applications); insertRows('settings', data.settings); insertRows('images', data.images || []); insertRows('users', data.users || []); insertRows('favorites', data.favorites || []);
   if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting('markup', '50');
 });
 async function sendBackup() {
@@ -169,7 +183,7 @@ async function sendBackup() {
 }
 let bkTimer = null;
 app.use((req, res, next) => { // har o‘zgarishdan 1 daqiqa keyin avtomatik zaxira
-  if (req.method !== 'GET' && !/^\/api\/admin\/(login|backup)/.test(req.path)) res.on('finish', () => { if (res.statusCode < 400 && bot) { clearTimeout(bkTimer); bkTimer = setTimeout(sendBackup, 60000); } });
+  if (req.method !== 'GET' && !/^\/api\/(admin\/(login|backup)|favorites)/.test(req.path)) res.on('finish', () => { if (res.statusCode < 400 && bot) { clearTimeout(bkTimer); bkTimer = setTimeout(sendBackup, 60000); } });
   next();
 });
 
@@ -189,6 +203,7 @@ app.get('/api/catalog', (_, res) => {
   res.json({
     products: db.prepare('SELECT id,name,price,stock,image,images,description,category FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
+    bot: botUser,
     markup: Number(getSetting('markup', '50')),
     terms: TERMS,
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
@@ -245,7 +260,7 @@ app.get('/api/admin', auth, admin, (req, res) => {
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
-    stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
+    remind_days: Number(getSetting('remind_days', '3')), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
   });
 });
 
@@ -299,7 +314,7 @@ const changeStatus = db.transaction((id, status) => {
     db.prepare('UPDATE products SET stock=stock+1 WHERE id=?').run(a.product_id);
     db.prepare('UPDATE applications SET stock_taken=0 WHERE id=?').run(id);
   }
-  db.prepare('UPDATE applications SET status=? WHERE id=?').run(status, id);
+  db.prepare("UPDATE applications SET status=?, approved_at=CASE WHEN ?='approved' AND approved_at='' THEN datetime('now') ELSE approved_at END WHERE id=?").run(status, status, id);
   return a;
 });
 
@@ -326,6 +341,11 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
     if (!Number.isFinite(markup) || markup < 0 || markup > 300) return res.status(400).json({ error: 'Ustama 0–300% oralig‘ida bo‘lsin.' });
     setSetting('markup', markup);
   }
+  if (b.remind_days !== undefined) {
+    const v = Number(b.remind_days);
+    if (!Number.isInteger(v) || v < 0 || v > 30) return res.status(400).json({ error: 'Eslatma kunlari 0–30 oralig‘ida bo‘lsin (0 = o‘chirilgan).' });
+    setSetting('remind_days', v);
+  }
   if (b.markups !== undefined) {
     const o = {};
     for (const t of TERMS) { const v = Number((b.markups || {})[t]); if (!Number.isFinite(v) || v < 0 || v > 300) return res.status(400).json({ error: 'Har bir muddat ustamasi 0–300% bo‘lsin.' }); o[t] = v; }
@@ -345,6 +365,24 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/favorites', auth, (req, res) => res.json(db.prepare('SELECT product_id FROM favorites WHERE telegram_id=?').all(String(req.user.id)).map(r => r.product_id)));
+app.post('/api/favorites/:id', auth, (req, res) => {
+  if (req.authType !== 'telegram') return res.status(403).json({ error: 'Faqat Telegram ichida.' });
+  const id = Number(req.params.id), uid = String(req.user.id);
+  if (!db.prepare('SELECT 1 FROM products WHERE id=?').get(id)) return res.status(404).json({ error: 'Topilmadi.' });
+  const has = db.prepare('SELECT 1 FROM favorites WHERE telegram_id=? AND product_id=?').get(uid, id);
+  if (has) db.prepare('DELETE FROM favorites WHERE telegram_id=? AND product_id=?').run(uid, id);
+  else db.prepare('INSERT INTO favorites(telegram_id,product_id) VALUES(?,?)').run(uid, id);
+  res.json({ fav: !has });
+});
+app.post('/api/admin/broadcast', auth, admin, (req, res) => {
+  if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
+  const text = String((req.body || {}).text || '').trim().slice(0, 1000);
+  if (text.length < 3) return res.status(400).json({ error: 'Xabar juda qisqa.' });
+  const ids = db.prepare('SELECT telegram_id FROM users WHERE blocked=0').all().map(r => r.telegram_id);
+  res.json({ count: ids.length });
+  (async () => { for (const id of ids) { await sendUser(id, '📣 ' + text, appBtn()); await new Promise(r => setTimeout(r, 60)); } })();
+});
 app.post('/api/admin/upload', auth, admin, (req, res) => {
   const d = String((req.body || {}).data || '');
   if (!d || d.length > 900000 || !/^[A-Za-z0-9+/=]+$/.test(d)) return res.status(400).json({ error: 'Rasm noto‘g‘ri yoki juda katta.' });
@@ -378,14 +416,75 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
   // shuning uchun ariza/admin ishlamaydi. Inline tugma va Menu tugmasi ishlatiladi.
   bot.setChatMenuButton({ menu_button: JSON.stringify({ type: 'web_app', text: '📱 Ilova', web_app: { url } }) })
     .catch(e => console.error('MenuButton:', e.message));
-  bot.onText(/\/start/, async msg => {
+  bot.getMe().then(me => { botUser = me.username || ''; }).catch(() => {});
+  const upsertUser = u => { try { db.prepare('INSERT INTO users(telegram_id,name,username) VALUES(?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET name=excluded.name, username=excluded.username, blocked=0').run(String(u.id), String(u.first_name || '').slice(0, 80), String(u.username || '').slice(0, 40)); } catch (_) {} };
+  bot.onText(/\/start(?:\s+(\w+))?/, async (msg, m) => {
     try {
-      await bot.sendMessage(msg.chat.id, '🍊 Mandarin Nasiya', { reply_markup: { remove_keyboard: true } }); // eski keyboard tugmani o‘chiradi
+      upsertUser(msg.from);
+      if (m && m[1] === 'support') return bot.sendMessage(msg.chat.id, '🆘 Texnik yordam\nSavolingizni shu yerga yozing (matn yoki rasm) — adminga yuboraman, javob shu chatga keladi.');
+      await bot.sendMessage(msg.chat.id, '🍊 Mandarin Nasiya', { reply_markup: { remove_keyboard: true } });
       await bot.sendMessage(msg.chat.id, 'Telefonlarni ko‘ring, oylik to‘lovni hisoblang va ariza yuboring.', {
-        reply_markup: { inline_keyboard: [[{ text: '📱 Ilovani ochish', web_app: { url } }]] }
+        reply_markup: { inline_keyboard: [[{ text: '📱 Ilovani ochish', web_app: { url } }], [{ text: '🆘 Texnik yordam', callback_data: 'support' }]] }
       });
+      if (adminIds().includes(String(msg.from.id))) bot.sendMessage(msg.chat.id, '👨‍💼 Admin: mijoz yozsa xabar shu yerga keladi. Javob berish uchun xabarga REPLY qiling — javob mijozga yetadi.');
     } catch (e) { console.error('/start:', e.message); }
   });
+  bot.on('callback_query', q => {
+    if (q.data === 'support') { bot.answerCallbackQuery(q.id).catch(() => {}); bot.sendMessage(q.message.chat.id, '🆘 Savolingizni shu yerga yozing (matn yoki rasm) — adminga yuboraman.').catch(() => {}); }
+  });
+  const hits = new Map();
+  bot.on('message', async msg => { // texnik yordam: mijoz -> adminlar, admin REPLY -> mijoz
+    try {
+      if (msg.chat.type !== 'private' || msg.web_app_data || /^\/(start|help)/.test(msg.text || '')) return;
+      const uid = String(msg.from.id);
+      if (adminIds().includes(uid)) {
+        const rt = msg.reply_to_message;
+        const m = rt && db.prepare('SELECT user_id FROM support_msgs WHERE admin_chat=? AND admin_msg=?').get(String(msg.chat.id), rt.message_id);
+        if (!m) return;
+        await bot.sendMessage(m.user_id, '👨‍💼 Texnik yordam javobi:');
+        await bot.copyMessage(m.user_id, msg.chat.id, msg.message_id);
+        return bot.sendMessage(msg.chat.id, '✅ Mijozga yuborildi.', { reply_to_message_id: msg.message_id });
+      }
+      upsertUser(msg.from);
+      const t = (hits.get(uid) || []).filter(x => Date.now() - x < 60000);
+      if (t.length >= 8) return;
+      t.push(Date.now()); hits.set(uid, t);
+      const who = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') + (msg.from.username ? ' (@' + msg.from.username + ')' : '') + ' · ID ' + uid;
+      for (const a of adminIds()) {
+        const h = await bot.sendMessage(a, '🆘 Texnik yordam\n👤 ' + who + '\n↩️ Javob berish uchun shu xabarga yoki pastdagi nusxaga REPLY qiling.');
+        const c = await bot.copyMessage(a, msg.chat.id, msg.message_id);
+        for (const mid of [h.message_id, c.message_id]) db.prepare('INSERT OR REPLACE INTO support_msgs(admin_chat,admin_msg,user_id) VALUES(?,?,?)').run(String(a), mid, uid);
+      }
+      bot.sendMessage(msg.chat.id, '✅ Xabaringiz texnik yordamga yuborildi. Tez orada javob beramiz.');
+    } catch (e) { console.error('Support:', e.message); }
+  });
+  const tz = () => new Date(Date.now() + 5 * 3600 * 1000); // Toshkent vaqti (UTC+5), UTC getter'lar bilan o‘qiladi
+  async function runReminders() {
+    const now = tz(), hour = now.getUTCHours();
+    if (hour < 10 || hour >= 20) return; // kechasi xabar yubormaymiz
+    const days = Number(getSetting('remind_days', '3'));
+    if (days > 0) { // yoqqan telefon + 12/18/24 oylik to‘lovlar
+      const us = db.prepare("SELECT u.telegram_id id FROM users u WHERE u.blocked=0 AND EXISTS(SELECT 1 FROM favorites f JOIN products p ON p.id=f.product_id AND p.active=1 AND p.stock>0 WHERE f.telegram_id=u.telegram_id) AND (u.last_remind='' OR julianday('now')-julianday(u.last_remind)>=?) LIMIT 25").all(days);
+      for (const u of us) {
+        const ps = db.prepare('SELECT p.* FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.telegram_id=? AND p.active=1 AND p.stock>0 ORDER BY f.created_at DESC LIMIT 3').all(u.id);
+        const lines = ps.map(p => '📱 ' + p.name + ' — ' + money(p.price) + '\n' + [12, 18, 24].map(mm => '   ' + mm + ' oy: ' + money(Math.ceil(p.price * (1 + markupFor(mm) / 100) / mm)) + '/oy').join('\n'));
+        await sendUser(u.id, '❤️ Sizga yoqqan telefon' + (ps.length > 1 ? 'lar' : '') + ':\n\n' + lines.join('\n\n') + '\n\nAriza qoldiring — tez javob beramiz 👇', appBtn());
+        db.prepare("UPDATE users SET last_remind=datetime('now') WHERE telegram_id=?").run(u.id);
+        await new Promise(r => setTimeout(r, 80));
+      }
+    }
+    const today = now.toISOString().slice(0, 10), tmr = new Date(now.getTime() + 86400000); // oylik to‘lovdan 1 kun oldin
+    const apps = db.prepare("SELECT a.*, p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id WHERE a.status='approved' AND a.pay_type='installment' AND a.months>0 AND a.approved_at!='' AND a.last_pay_remind!=?").all(today);
+    for (const a of apps) {
+      const ap = new Date(new Date(a.approved_at.replace(' ', 'T') + 'Z').getTime() + 5 * 3600 * 1000);
+      const passed = (tmr.getUTCFullYear() * 12 + tmr.getUTCMonth()) - (ap.getUTCFullYear() * 12 + ap.getUTCMonth());
+      if (tmr.getUTCDate() !== Math.min(ap.getUTCDate(), 28) || passed < 1 || passed > a.months) continue;
+      await sendUser(a.telegram_id, '⏰ Eslatma: ertaga oylik to‘lov kuni.\n📱 ' + (a.pname || '') + '\n💳 To‘lov: ' + money(a.monthly) + ' (' + passed + '/' + a.months + '-oy)');
+      db.prepare('UPDATE applications SET last_pay_remind=? WHERE id=?').run(today, a.id);
+    }
+  }
+  setTimeout(() => runReminders().catch(e => console.error('Reminders:', e.message)), 90000);
+  setInterval(() => runReminders().catch(e => console.error('Reminders:', e.message)), 30 * 60 * 1000);
   bot.on('document', async msg => { // admin zaxira faylini yuborsa — tiklanadi
     try {
       if (msg.chat.type !== 'private' || !adminIds().includes(String(msg.from.id))) return;

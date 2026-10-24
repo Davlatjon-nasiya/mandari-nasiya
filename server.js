@@ -63,17 +63,28 @@ if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting(
 
 const TERMS = [3, 6, 12, 18, 24];
 const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}')); if (o[m] !== undefined && Number.isFinite(Number(o[m]))) return Number(o[m]); } catch (_) {} return Number(getSetting('markup', '50')); };
+const colsOf = t => db.prepare('PRAGMA table_info(' + t + ')').all().map(c => c.name);
+for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0']])
+  if (!colsOf(t).includes(c)) db.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + d);
 const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
 const markupsMap = () => Object.fromEntries(TERMS.map(t => [t, markupFor(t)]));
-const shape = p => { let im = []; try { im = JSON.parse(p.images || '[]'); } catch (_) {} if (!im.length && p.image) im = [p.image]; return { ...p, images: im }; };
+const shape = p => {
+  let im = [], vs = [];
+  try { im = JSON.parse(p.images || '[]'); } catch (_) {} try { vs = JSON.parse(p.variants || '[]'); } catch (_) {}
+  if (!im.length && p.image) im = [p.image];
+  let out = { ...p, images: im, variants: vs };
+  const today = new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10);
+  if (p.old_price > 0 && p.sale_until && p.sale_until < today) out = { ...out, price: p.old_price, old_price: 0, sale_until: '' }; // aksiya tugagan
+  return out;
+};
 const dataKey = crypto.createHash('sha256').update(process.env.DATA_KEY || ('mandarin|' + (process.env.BOT_TOKEN || 'local'))).digest();
 const enc = t => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', dataKey, iv), e = Buffer.concat([c.update(String(t), 'utf8'), c.final()]); return [iv, c.getAuthTag(), e].map(x => x.toString('base64')).join('.'); };
 const dec = v => { try { const [iv, tag, e] = String(v).split('.').map(x => Buffer.from(x, 'base64')); const d = crypto.createDecipheriv('aes-256-gcm', dataKey, iv); d.setAuthTag(tag); return Buffer.concat([d.update(e), d.final()]).toString('utf8'); } catch (_) { return ''; } };
 const normPass = v => String(v || '').toUpperCase().replace(/[АВСЕКМНОРТХУ]/g, c => ({ 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X', 'У': 'Y' })[c]).replace(/[^A-Z0-9]/g, '').slice(0, 12);
 const passOk = s => /^[A-Z0-9]{7,12}$/.test(s) && (s.match(/\d/g) || []).length >= 6;
 const luhn = n => { let x = 0, a = false; for (let i = n.length - 1; i >= 0; i--) { let d = +n[i]; if (a) { d *= 2; if (d > 9) d -= 9; } x += d; a = !a; } return x % 10 === 0; };
-const STATUSES = ['new', 'review', 'approved', 'rejected'];
-const STATUS_UZ = { new: 'Yangi', review: 'Ko‘rib chiqilmoqda', approved: 'Tasdiqlandi', rejected: 'Rad etildi' };
+const STATUSES = ['new', 'review', 'approved', 'preparing', 'shipping', 'delivered', 'rejected'];
+const STATUS_UZ = { new: 'Yangi', review: 'Ko‘rib chiqilmoqda', approved: 'Tasdiqlandi', preparing: 'Tayyorlanmoqda', shipping: 'Yo‘lda', delivered: 'Topshirildi', rejected: 'Rad etildi' };
 const PHONE_RE = /^[+\d\s()-]{9,20}$/;
 
 const adminIds = () => (process.env.ADMIN_IDS || '').split(',').map(x => x.trim()).filter(Boolean);
@@ -130,6 +141,9 @@ function admin(req, res, next) {
   return res.status(403).json({ error: 'Admin huquqi yo‘q.' });
 }
 
+const staffIds = () => [...adminIds(), ...(process.env.MANAGER_IDS || '').split(',').map(x => x.trim()).filter(Boolean)];
+const roleOf = req => req.authType === 'web' ? 'admin' : adminIds().includes(String(req.user && req.user.id)) ? 'admin' : staffIds().includes(String(req.user && req.user.id)) ? 'manager' : '';
+function staff(req, res, next) { if (req.authType === 'telegram' && staffIds().includes(String(req.user.id))) return next(); return admin(req, res, next); }
 // parol tanlashdan himoya: 15 daqiqada 8 ta urinish
 const attempts = new Map();
 function loginLimit(req, res, next) {
@@ -201,7 +215,7 @@ app.post('/api/admin/login', loginLimit, (req, res) => {
 
 app.get('/api/catalog', (_, res) => {
   res.json({
-    products: db.prepare('SELECT id,name,price,stock,image,images,description,category FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
+    products: db.prepare('SELECT id,name,price,stock,image,images,description,category,variants,old_price,sale_until FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
     bot: botUser,
     markup: Number(getSetting('markup', '50')),
@@ -214,34 +228,56 @@ app.get('/api/catalog', (_, res) => {
 app.get('/api/me', (req, res) => {
   const user = verifyTelegram(req.get('X-Telegram-Init-Data'));
   if (!user) return res.status(401).json({ error: 'Telegram ichidan ilovani oching.' });
-  res.json({ id: user.id, name: user.first_name || '', admin: adminIds().includes(String(user.id)) });
+  res.json({ id: user.id, name: user.first_name || '', admin: staffIds().includes(String(user.id)), role: adminIds().includes(String(user.id)) ? 'admin' : staffIds().includes(String(user.id)) ? 'manager' : '' });
 });
 
+const promoFor = code => {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  const today = new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10);
+  for (const line of getSetting('promos').split('\n')) {
+    const [k, pct, until, max] = line.split('|').map(x => x.trim());
+    if (k && k.toUpperCase() === c) {
+      const used = db.prepare('SELECT COUNT(*) c FROM applications WHERE promo=?').get(c).c, p = Number(pct);
+      if ((until && until < today) || (Number(max) > 0 && used >= Number(max)) || !(p > 0 && p < 100)) return null;
+      return { code: c, percent: p };
+    }
+  }
+  return null;
+};
+app.get('/api/promo', (req, res) => { const r = promoFor(req.query.code); return r ? res.json(r) : res.status(404).json({ error: 'Promokod topilmadi yoki muddati tugagan.' }); });
 app.post('/api/applications', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(401).json({ error: 'Ariza yuborish uchun Telegram ichidan oching.' });
-  const b = req.body || {}, cash = b.pay_type === 'cash';
+  const b = req.body || {}, cash = b.pay_type === 'cash', bad = m => res.status(400).json({ error: m });
   const customer = String(b.customer || '').trim(), phone = String(b.phone || '').trim();
-  const p = db.prepare('SELECT * FROM products WHERE id=? AND active=1').get(Number(b.product_id));
-  const bad = m => res.status(400).json({ error: m });
-  if (!p || p.stock < 1) return bad('Bu telefon hozir mavjud emas.');
+  const raw = db.prepare('SELECT * FROM products WHERE id=? AND active=1').get(Number(b.product_id)), p0 = raw && shape(raw);
+  if (!p0) return bad('Bu telefon hozir mavjud emas.');
+  let price = p0.price, left = p0.stock, variant = '';
+  if (p0.variants.length) { const v = p0.variants.find(x => x.name === b.variant); if (!v) return bad('Variantni tanlang.'); price = v.price; left = v.stock; variant = v.name; }
+  if (left < 1) return bad('Bu telefon hozir mavjud emas.');
+  const pr = promoFor(b.promo);
+  if (b.promo && !pr) return bad('Promokod noto‘g‘ri yoki muddati tugagan.');
+  if (pr) price = Math.round(price * (1 - pr.percent / 100));
   if (customer.length < 2 || customer.length > 100) return bad('Ism-familiyani to‘g‘ri kiriting.');
   if (!PHONE_RE.test(phone)) return bad('Telefon raqamini to‘g‘ri kiriting. Masalan: +998 90 123 45 67');
-  let months = 0, down = p.price, total = p.price, monthly = 0, passEnc = '', cardEnc = '', last4 = '', cardPhone = '';
+  let months = 0, down = price, total = price, monthly = 0, tradeModel = '', tradeValue = 0;
   if (!cash) {
-    months = Number(b.months); down = Number(b.down || 0);
+    months = Number(b.months); tradeValue = Number(b.trade_value || 0); tradeModel = String(b.trade_model || '').trim().slice(0, 80);
+    down = Number(b.down || 0) + tradeValue;
     if (!TERMS.includes(months)) return bad('Muddat noto‘g‘ri.');
-    if (!Number.isSafeInteger(down) || down < 0 || down >= p.price) return bad('Boshlang‘ich to‘lov 0 dan telefon narxigacha (narxdan kam) bo‘lsin.');
-    total = Math.ceil((p.price - down) * (1 + markupFor(months) / 100)); monthly = Math.ceil(total / months);
+    if (!Number.isSafeInteger(tradeValue) || tradeValue < 0 || !Number.isSafeInteger(down) || down < 0 || down >= price) return bad('Boshlang‘ich to‘lov (eski telefon bahosi bilan) telefon narxidan kam bo‘lsin.');
+    total = Math.ceil((price - down) * (1 + markupFor(months) / 100)); monthly = Math.ceil(total / months);
   }
-  const open = db.prepare("SELECT COUNT(*) c FROM applications WHERE telegram_id=? AND status IN ('new','review')").get(String(req.user.id)).c;
-  if (open >= 5) return res.status(429).json({ error: 'Sizda 5 ta ko‘rib chiqilayotgan ariza bor. Javobini kuting.' });
-  const dup = db.prepare("SELECT id FROM applications WHERE telegram_id=? AND product_id=? AND status IN ('new','review')").get(String(req.user.id), p.id);
+  const uid = String(req.user.id);
+  if (db.prepare("SELECT COUNT(*) c FROM applications WHERE telegram_id=? AND status IN ('new','review')").get(uid).c >= 5) return res.status(429).json({ error: 'Sizda 5 ta ko‘rib chiqilayotgan ariza bor. Javobini kuting.' });
+  const dup = db.prepare("SELECT id FROM applications WHERE telegram_id=? AND product_id=? AND variant=? AND status IN ('new','review')").get(uid, p0.id, variant);
   if (dup) return res.status(409).json({ error: 'Bu telefon uchun arizangiz allaqachon bor (#' + dup.id + ').' });
-  const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,passport_enc,card_enc,card_last4,card_phone,consent_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(String(req.user.id), customer, phone, p.id, months, down, total, monthly, cash ? 'cash' : 'installment', passEnc, cardEnc, last4, cardPhone, cash ? '' : new Date().toISOString());
-  const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + '\n👤 ' + customer + '\n📞 ' + phone + '\n📱 ' + p.name + ' — ' + money(p.price) +
-    (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')');
-  adminIds().forEach(id => notify(id, msg));
+  const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,consent_at,variant,trade_model,trade_value,promo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(uid, customer, phone, p0.id, months, down, total, monthly, cash ? 'cash' : 'installment', '', variant, tradeModel, tradeValue, pr ? pr.code : '');
+  const risky = db.prepare('SELECT risky FROM users WHERE telegram_id=?').get(uid);
+  const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + (risky && risky.risky ? '\n⚠️ ISHONCHSIZ deb belgilangan mijoz!' : '') + '\n👤 ' + customer + '\n📞 ' + phone + '\n📱 ' + p0.name + (variant ? ' (' + variant + ')' : '') + ' — ' + money(price) + (pr ? ' (🎟 ' + pr.code + ' −' + pr.percent + '%)' : '') +
+    (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + (tradeValue ? ' (shundan eski telefon ' + tradeModel + ' ≈ ' + money(tradeValue) + ')' : '') + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')');
+  staffIds().forEach(id => notify(id, msg));
   res.json({ id: r.lastInsertRowid, status: 'new' });
 });
 
@@ -251,16 +287,16 @@ app.get('/api/applications/mine', auth, (req, res) => {
 });
 
 /* ---------- Admin API ---------- */
-app.get('/api/admin', auth, admin, (req, res) => {
+app.get('/api/admin', auth, staff, (req, res) => {
   const stats = db.prepare("SELECT COUNT(*) total, SUM(status='new') new_, SUM(status='review') review, SUM(status='approved') approved, SUM(status='rejected') rejected FROM applications").get();
   res.json({
     products: db.prepare('SELECT * FROM products ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
-    applications: db.prepare('SELECT a.*,p.name AS product FROM applications a LEFT JOIN products p ON a.product_id=p.id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc) })),
+    applications: db.prepare('SELECT a.*,p.name AS product,COALESCE(u.risky,0) AS risky FROM applications a LEFT JOIN products p ON a.product_id=p.id LEFT JOIN users u ON u.telegram_id=a.telegram_id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc) })),
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
-    remind_days: Number(getSetting('remind_days', '3')), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
+    remind_days: Number(getSetting('remind_days', '3')), promos: getSetting('promos'), role: roleOf(req), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
   });
 });
 
@@ -269,13 +305,26 @@ function parseImages(v) {
   const arr = (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => String(x).trim()).filter(Boolean);
   return arr.length <= 6 && arr.every(validImage) ? arr : null;
 }
+function parseVariants(v) {
+  const lines = (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => String(x).trim()).filter(Boolean), out = [];
+  for (const line of lines) {
+    const [n, p, st] = line.split('|').map(x => x.trim()), price = Number(p), stock = Number(st);
+    if (!n || n.length > 50 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0) return null;
+    out.push({ name: n, price, stock });
+  }
+  return out.length <= 12 ? out : null;
+}
+const saleOk = (old, until, price) => (!old && !until) || (Number.isSafeInteger(old) && old > price && /^\d{4}-\d{2}-\d{2}$/.test(until));
+const PBAD = 'Qiymatlarni tekshiring: nomi, narx, soni, rasm havolalari, variantlar («nom | narx | soni») yoki aksiya (eski narx va tugash sanasi).';
 app.post('/api/admin/products', auth, admin, (req, res) => {
-  const b = req.body || {}, name = String(b.name || '').trim(), price = Number(b.price), stock = Number(b.stock);
+  const b = req.body || {}, name = String(b.name || '').trim();
+  let price = Number(b.price), stock = Number(b.stock);
   const description = String(b.description || '').trim().slice(0, 1000), category = String(b.category || '').trim().slice(0, 40);
-  const imgs = parseImages(b.images !== undefined ? b.images : b.image);
-  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || !imgs)
-    return res.status(400).json({ error: 'Nomi, narxi, soni yoki rasm havolalarini (https://, ko‘pi bilan 6 ta) tekshiring.' });
-  const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category) VALUES(?,?,?,?,?,?,?)').run(name, price, stock, imgs[0] || '', JSON.stringify(imgs), description, category);
+  const imgs = parseImages(b.images !== undefined ? b.images : b.image), vs = parseVariants(b.variants);
+  if (vs && vs.length) { price = Math.min(...vs.map(v => v.price)); stock = vs.reduce((t, v) => t + v.stock, 0); }
+  const old = Number(b.old_price || 0), until = String(b.sale_until || '');
+  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
+  const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category,variants,old_price,sale_until) VALUES(?,?,?,?,?,?,?,?,?,?)').run(name, price, stock, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until);
   res.json({ id: r.lastInsertRowid });
 });
 app.patch('/api/admin/products/:id', auth, admin, (req, res) => {
@@ -283,13 +332,16 @@ app.patch('/api/admin/products/:id', auth, admin, (req, res) => {
   if (!p) return res.status(404).json({ error: 'Mahsulot topilmadi.' });
   const b = req.body || {}, cur = shape(p);
   const name = String(b.name === undefined ? p.name : b.name).trim();
-  const price = Number(b.price === undefined ? p.price : b.price), stock = Number(b.stock === undefined ? p.stock : b.stock), active = Number(b.active === undefined ? p.active : b.active);
+  let price = Number(b.price === undefined ? p.price : b.price), stock = Number(b.stock === undefined ? p.stock : b.stock);
+  const active = Number(b.active === undefined ? p.active : b.active);
   const description = String(b.description === undefined ? p.description : b.description).trim().slice(0, 1000);
   const category = String(b.category === undefined ? p.category : b.category).trim().slice(0, 40);
   const imgs = b.images === undefined ? cur.images : parseImages(b.images);
-  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || ![0, 1].includes(active) || !imgs)
-    return res.status(400).json({ error: 'Qiymatlarni va rasm havolalarini tekshiring.' });
-  db.prepare('UPDATE products SET name=?,price=?,stock=?,active=?,image=?,images=?,description=?,category=? WHERE id=?').run(name, price, stock, active, imgs[0] || '', JSON.stringify(imgs), description, category, id);
+  const vs = b.variants === undefined ? cur.variants : parseVariants(b.variants);
+  if (vs && vs.length) { price = Math.min(...vs.map(v => v.price)); stock = vs.reduce((t, v) => t + v.stock, 0); }
+  const old = Number(b.old_price === undefined ? p.old_price : b.old_price || 0), until = String(b.sale_until === undefined ? p.sale_until : b.sale_until);
+  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || ![0, 1].includes(active) || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
+  db.prepare('UPDATE products SET name=?,price=?,stock=?,active=?,image=?,images=?,description=?,category=?,variants=?,old_price=?,sale_until=? WHERE id=?').run(name, price, stock, active, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until, id);
   res.json({ ok: true });
 });
 
@@ -303,22 +355,29 @@ app.delete('/api/admin/products/:id', auth, admin, (req, res) => {
   res.json({ ok: db.prepare('DELETE FROM products WHERE id=?').run(id).changes > 0 });
 });
 
+const TAKEN = ['approved', 'preparing', 'shipping', 'delivered'];
+function adjStock(a, delta) {
+  const p = db.prepare('SELECT * FROM products WHERE id=?').get(a.product_id);
+  if (!p) return true;
+  if (a.variant) {
+    const vs = JSON.parse(p.variants || '[]'), v = vs.find(x => x.name === a.variant);
+    if (v) { if (v.stock + delta < 0) return false; v.stock += delta; db.prepare('UPDATE products SET variants=?, stock=? WHERE id=?').run(JSON.stringify(vs), vs.reduce((t, x) => t + x.stock, 0), p.id); return true; }
+  }
+  if (p.stock + delta < 0) return false;
+  db.prepare('UPDATE products SET stock=stock+? WHERE id=?').run(delta, p.id);
+  return true;
+}
 const changeStatus = db.transaction((id, status) => {
   const a = db.prepare('SELECT * FROM applications WHERE id=?').get(id);
   if (!a) return null;
-  if (status === 'approved' && !a.stock_taken) {
-    const r = db.prepare('UPDATE products SET stock=stock-1 WHERE id=? AND stock>0').run(a.product_id);
-    if (!r.changes) throw new Error('Omborda bu telefon qolmagan.');
-    db.prepare('UPDATE applications SET stock_taken=1 WHERE id=?').run(id);
-  } else if (status !== 'approved' && a.stock_taken) {
-    db.prepare('UPDATE products SET stock=stock+1 WHERE id=?').run(a.product_id);
-    db.prepare('UPDATE applications SET stock_taken=0 WHERE id=?').run(id);
-  }
-  db.prepare("UPDATE applications SET status=?, approved_at=CASE WHEN ?='approved' AND approved_at='' THEN datetime('now') ELSE approved_at END WHERE id=?").run(status, status, id);
+  const take = TAKEN.includes(status);
+  if (take && !a.stock_taken) { if (!adjStock(a, -1)) throw new Error('Omborda bu telefon qolmagan.'); db.prepare('UPDATE applications SET stock_taken=1 WHERE id=?').run(id); }
+  else if (!take && a.stock_taken) { adjStock(a, 1); db.prepare('UPDATE applications SET stock_taken=0 WHERE id=?').run(id); }
+  db.prepare("UPDATE applications SET status=?, approved_at=CASE WHEN ? IN ('approved','preparing','shipping','delivered') AND approved_at='' THEN datetime('now') ELSE approved_at END WHERE id=?").run(status, status, id);
   return a;
 });
 
-app.patch('/api/admin/applications/:id', auth, admin, (req, res) => {
+app.patch('/api/admin/applications/:id', auth, staff, (req, res) => {
   const b = req.body || {}, status = String(b.status || '');
   if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Ariza holati noto‘g‘ri.' });
   const note = String(b.note === undefined ? '' : b.note).trim().slice(0, 300);
@@ -361,7 +420,7 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
   if (b.contact_telegram !== undefined && !/^@?[A-Za-z0-9_]{0,32}$/.test(String(b.contact_telegram).trim()))
     return res.status(400).json({ error: 'Telegram username noto‘g‘ri (masalan @mandarin_nasiya).' });
   if (b.contact_instagram !== undefined && !/^@?[A-Za-z0-9_.]{0,31}$/.test(String(b.contact_instagram).trim())) return res.status(400).json({ error: 'Instagram username noto‘g‘ri (masalan @mandarin_nasiya).' });
-  text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200); text('info_installment', 1500); text('info_delivery', 1500); text('info_about', 1500);
+  text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200); text('info_installment', 1500); text('info_delivery', 1500); text('info_about', 1500); text('promos', 1500);
   res.json({ ok: true });
 });
 
@@ -382,6 +441,23 @@ app.post('/api/admin/broadcast', auth, admin, (req, res) => {
   const ids = db.prepare('SELECT telegram_id FROM users WHERE blocked=0').all().map(r => r.telegram_id);
   res.json({ count: ids.length });
   (async () => { for (const id of ids) { await sendUser(id, '📣 ' + text, appBtn()); await new Promise(r => setTimeout(r, 60)); } })();
+});
+app.get('/api/admin/customers', auth, staff, (req, res) => res.json(db.prepare('SELECT u.telegram_id id,u.name,u.username,u.note,u.risky,(SELECT COUNT(*) FROM applications a WHERE a.telegram_id=u.telegram_id) apps FROM users u ORDER BY apps DESC, u.rowid DESC LIMIT 500').all()));
+app.patch('/api/admin/customers/:id', auth, staff, (req, res) => {
+  const b = req.body || {};
+  res.json({ ok: db.prepare('UPDATE users SET note=?, risky=? WHERE telegram_id=?').run(String(b.note || '').trim().slice(0, 500), b.risky ? 1 : 0, String(req.params.id)).changes > 0 });
+});
+app.post('/api/admin/export', auth, staff, async (req, res) => {
+  if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
+  const rows = db.prepare('SELECT a.*,p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id ORDER BY a.id DESC').all();
+  const q = v => { let t = String(v == null ? '' : v); if (/^[=@]|^[+\-](?![\d\s])/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };
+  const head = ['ID', 'Sana', 'Mijoz', 'Telefon', 'Telefon modeli', 'Variant', 'Turi', 'Muddat (oy)', 'Avans', 'Oylik', 'Jami', 'Eski telefon', 'Eski telefon bahosi', 'Promokod', 'Holat', 'Izoh'];
+  const csv = '\ufeff' + [head, ...rows.map(a => [a.id, a.created_at, a.customer, a.phone, a.pname, a.variant, a.pay_type === 'cash' ? 'Naxt' : 'Nasiya', a.months, a.down, a.monthly, a.total, a.trade_model, a.trade_value, a.promo, STATUS_UZ[a.status] || a.status, a.note])].map(r => r.map(q).join(',')).join('\r\n');
+  let ok = false;
+  for (const id of (req.authType === 'telegram' ? [String(req.user.id)] : adminIds())) {
+    try { await bot.sendDocument(id, Buffer.from(csv), { caption: '📊 Arizalar (Excel/CSV)' }, { filename: 'arizalar-' + new Date().toISOString().slice(0, 10) + '.csv', contentType: 'text/csv' }); ok = true; } catch (e) { console.error('Export:', e.message); }
+  }
+  res.json({ ok });
 });
 app.post('/api/admin/upload', auth, admin, (req, res) => {
   const d = String((req.body || {}).data || '');
@@ -437,7 +513,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
     try {
       if (msg.chat.type !== 'private' || msg.web_app_data || /^\/(start|help)/.test(msg.text || '')) return;
       const uid = String(msg.from.id);
-      if (adminIds().includes(uid)) {
+      if (staffIds().includes(uid)) {
         const rt = msg.reply_to_message;
         const m = rt && db.prepare('SELECT user_id FROM support_msgs WHERE admin_chat=? AND admin_msg=?').get(String(msg.chat.id), rt.message_id);
         if (!m) return;
@@ -450,7 +526,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
       if (t.length >= 8) return;
       t.push(Date.now()); hits.set(uid, t);
       const who = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') + (msg.from.username ? ' (@' + msg.from.username + ')' : '') + ' · ID ' + uid;
-      for (const a of adminIds()) {
+      for (const a of staffIds()) {
         const h = await bot.sendMessage(a, '🆘 Texnik yordam\n👤 ' + who + '\n↩️ Javob berish uchun shu xabarga yoki pastdagi nusxaga REPLY qiling.');
         const c = await bot.copyMessage(a, msg.chat.id, msg.message_id);
         for (const mid of [h.message_id, c.message_id]) db.prepare('INSERT OR REPLACE INTO support_msgs(admin_chat,admin_msg,user_id) VALUES(?,?,?)').run(String(a), mid, uid);
@@ -474,7 +550,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
       }
     }
     const today = now.toISOString().slice(0, 10), tmr = new Date(now.getTime() + 86400000); // oylik to‘lovdan 1 kun oldin
-    const apps = db.prepare("SELECT a.*, p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id WHERE a.status='approved' AND a.pay_type='installment' AND a.months>0 AND a.approved_at!='' AND a.last_pay_remind!=?").all(today);
+    const apps = db.prepare("SELECT a.*, p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id WHERE a.status IN ('approved','preparing','shipping','delivered') AND a.pay_type='installment' AND a.months>0 AND a.approved_at!='' AND a.last_pay_remind!=?").all(today);
     for (const a of apps) {
       const ap = new Date(new Date(a.approved_at.replace(' ', 'T') + 'Z').getTime() + 5 * 3600 * 1000);
       const passed = (tmr.getUTCFullYear() * 12 + tmr.getUTCMonth()) - (ap.getUTCFullYear() * 12 + ap.getUTCMonth());

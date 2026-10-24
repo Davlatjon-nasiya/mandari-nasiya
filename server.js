@@ -7,6 +7,7 @@ const Database = require('better-sqlite3');
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use('/api/admin/upload', express.json({ limit: '1mb' }));
 app.use(express.json({ limit: '30kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -45,6 +46,9 @@ if (!prodCols.includes('category')) db.exec("ALTER TABLE products ADD COLUMN cat
 if (!prodCols.includes('images')) db.exec("ALTER TABLE products ADD COLUMN images TEXT NOT NULL DEFAULT '[]'");
 if (!appCols.includes('total')) db.exec('ALTER TABLE applications ADD COLUMN total INTEGER NOT NULL DEFAULT 0');
 if (!appCols.includes('monthly')) db.exec('ALTER TABLE applications ADD COLUMN monthly INTEGER NOT NULL DEFAULT 0');
+db.exec('CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
+for (const [c, d] of [['pay_type', "'installment'"], ['passport_enc', "''"], ['card_enc', "''"], ['card_last4', "''"], ['card_phone', "''"], ['consent_at', "''"]])
+  if (!appCols.includes(c)) db.exec('ALTER TABLE applications ADD COLUMN ' + c + ' TEXT NOT NULL DEFAULT ' + d);
 if (!appCols.includes('note')) db.exec("ALTER TABLE applications ADD COLUMN note TEXT NOT NULL DEFAULT ''");
 
 const getSetting = (k, d = '') => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? r.value : d; };
@@ -55,6 +59,10 @@ const TERMS = [3, 6, 12, 18, 24];
 const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}')); if (o[m] !== undefined && Number.isFinite(Number(o[m]))) return Number(o[m]); } catch (_) {} return Number(getSetting('markup', '50')); };
 const markupsMap = () => Object.fromEntries(TERMS.map(t => [t, markupFor(t)]));
 const shape = p => { let im = []; try { im = JSON.parse(p.images || '[]'); } catch (_) {} if (!im.length && p.image) im = [p.image]; return { ...p, images: im }; };
+const dataKey = crypto.createHash('sha256').update(process.env.DATA_KEY || ('mandarin|' + (process.env.BOT_TOKEN || 'local'))).digest();
+const enc = t => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', dataKey, iv), e = Buffer.concat([c.update(String(t), 'utf8'), c.final()]); return [iv, c.getAuthTag(), e].map(x => x.toString('base64')).join('.'); };
+const dec = v => { try { const [iv, tag, e] = String(v).split('.').map(x => Buffer.from(x, 'base64')); const d = crypto.createDecipheriv('aes-256-gcm', dataKey, iv); d.setAuthTag(tag); return Buffer.concat([d.update(e), d.final()]).toString('utf8'); } catch (_) { return ''; } };
+const luhn = n => { let x = 0, a = false; for (let i = n.length - 1; i >= 0; i--) { let d = +n[i]; if (a) { d *= 2; if (d > 9) d -= 9; } x += d; a = !a; } return x % 10 === 0; };
 const STATUSES = ['new', 'review', 'approved', 'rejected'];
 const STATUS_UZ = { new: 'Yangi', review: 'Ko‘rib chiqilmoqda', approved: 'Tasdiqlandi', rejected: 'Rad etildi' };
 const PHONE_RE = /^[+\d\s()-]{9,20}$/;
@@ -124,7 +132,7 @@ const notify = (chatId, text) => { if (bot && chatId && /^\d+$/.test(String(chat
 const money = n => Number(n).toLocaleString('ru-RU') + ' so‘m';
 
 /* ---------- Zaxira nusxa (Telegram orqali saqlash va tiklash) ---------- */
-const makeBackup = () => JSON.stringify({ v: 1, at: new Date().toISOString(), products: db.prepare('SELECT * FROM products').all(), applications: db.prepare('SELECT * FROM applications').all(), settings: db.prepare('SELECT * FROM settings').all() });
+const makeBackup = () => JSON.stringify({ v: 1, at: new Date().toISOString(), products: db.prepare('SELECT * FROM products').all(), applications: db.prepare('SELECT * FROM applications').all(), settings: db.prepare('SELECT * FROM settings').all(), images: db.prepare('SELECT * FROM images').all() });
 const insertRows = (table, rows) => {
   const cols = db.prepare('PRAGMA table_info(' + table + ')').all().map(c => c.name);
   for (const r of rows) {
@@ -134,8 +142,8 @@ const insertRows = (table, rows) => {
 };
 const restoreBackup = db.transaction(data => {
   if (!data || !Array.isArray(data.products) || !Array.isArray(data.applications) || !Array.isArray(data.settings)) throw new Error('Zaxira fayli noto‘g‘ri.');
-  db.exec('DELETE FROM applications; DELETE FROM products; DELETE FROM settings;');
-  insertRows('products', data.products); insertRows('applications', data.applications); insertRows('settings', data.settings);
+  db.exec('DELETE FROM applications; DELETE FROM products; DELETE FROM settings; DELETE FROM images;');
+  insertRows('products', data.products); insertRows('applications', data.applications); insertRows('settings', data.settings); insertRows('images', data.images || []);
   if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting('markup', '50');
 });
 async function sendBackup() {
@@ -192,29 +200,42 @@ app.get('/api/me', (req, res) => {
 
 app.post('/api/applications', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(401).json({ error: 'Ariza yuborish uchun Telegram ichidan oching.' });
-  const b = req.body || {};
+  const b = req.body || {}, cash = b.pay_type === 'cash';
   const customer = String(b.customer || '').trim(), phone = String(b.phone || '').trim();
-  const productId = Number(b.product_id), months = Number(b.months), down = Number(b.down || 0);
-  const p = db.prepare('SELECT * FROM products WHERE id=? AND active=1').get(productId);
-  if (!p || p.stock < 1) return res.status(400).json({ error: 'Bu telefon hozir mavjud emas.' });
-  if (customer.length < 2 || customer.length > 100) return res.status(400).json({ error: 'Ism-familiyani to‘g‘ri kiriting.' });
-  if (!PHONE_RE.test(phone)) return res.status(400).json({ error: 'Telefon raqamini to‘g‘ri kiriting. Masalan: +998 90 123 45 67' });
-  if (!TERMS.includes(months)) return res.status(400).json({ error: 'Muddat noto‘g‘ri.' });
-  if (!Number.isSafeInteger(down) || down < 0 || down >= p.price) return res.status(400).json({ error: 'Boshlang‘ich to‘lov 0 dan telefon narxigacha (narxdan kam) bo‘lsin.' });
+  const p = db.prepare('SELECT * FROM products WHERE id=? AND active=1').get(Number(b.product_id));
+  const bad = m => res.status(400).json({ error: m });
+  if (!p || p.stock < 1) return bad('Bu telefon hozir mavjud emas.');
+  if (customer.length < 2 || customer.length > 100) return bad('Ism-familiyani to‘g‘ri kiriting.');
+  if (!PHONE_RE.test(phone)) return bad('Telefon raqamini to‘g‘ri kiriting. Masalan: +998 90 123 45 67');
+  let months = 0, down = p.price, total = p.price, monthly = 0, passEnc = '', cardEnc = '', last4 = '', cardPhone = '';
+  if (!cash) {
+    months = Number(b.months); down = Number(b.down || 0);
+    if (!TERMS.includes(months)) return bad('Muddat noto‘g‘ri.');
+    if (!Number.isSafeInteger(down) || down < 0 || down >= p.price) return bad('Boshlang‘ich to‘lov 0 dan telefon narxigacha (narxdan kam) bo‘lsin.');
+    const passport = String(b.passport || '').replace(/\s/g, '').toUpperCase(), card = String(b.card || '').replace(/\D/g, '');
+    cardPhone = String(b.card_phone || '').trim();
+    if (!/^[A-Z]{2}\d{7}$/.test(passport)) return bad('Pasport seriya va raqamini kiriting. Masalan: AA1234567');
+    if (card.length !== 16 || !luhn(card)) return bad('Karta raqami (16 xona) noto‘g‘ri.');
+    if (!PHONE_RE.test(cardPhone)) return bad('Kartaga ulangan telefon raqamini to‘g‘ri kiriting.');
+    if (b.consent !== true) return bad('Ma’lumotlarni qayta ishlashga rozilik kerak.');
+    total = Math.ceil((p.price - down) * (1 + markupFor(months) / 100)); monthly = Math.ceil(total / months);
+    passEnc = enc(passport); cardEnc = enc(card); last4 = card.slice(-4);
+  }
   const open = db.prepare("SELECT COUNT(*) c FROM applications WHERE telegram_id=? AND status IN ('new','review')").get(String(req.user.id)).c;
   if (open >= 5) return res.status(429).json({ error: 'Sizda 5 ta ko‘rib chiqilayotgan ariza bor. Javobini kuting.' });
   const dup = db.prepare("SELECT id FROM applications WHERE telegram_id=? AND product_id=? AND status IN ('new','review')").get(String(req.user.id), p.id);
   if (dup) return res.status(409).json({ error: 'Bu telefon uchun arizangiz allaqachon bor (#' + dup.id + ').' });
-  const total = Math.ceil((p.price - down) * (1 + markupFor(months) / 100)), monthly = Math.ceil(total / months);
-  const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly) VALUES(?,?,?,?,?,?,?,?)').run(String(req.user.id), customer, phone, p.id, months, down, total, monthly);
-  const msg = '🆕 Yangi ariza #' + r.lastInsertRowid + '\n👤 ' + customer + '\n📞 ' + phone + '\n📱 ' + p.name + ' — ' + money(p.price) + '\n🗓 ' + months + ' oy · avans ' + money(down) + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')';
+  const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,passport_enc,card_enc,card_last4,card_phone,consent_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(String(req.user.id), customer, phone, p.id, months, down, total, monthly, cash ? 'cash' : 'installment', passEnc, cardEnc, last4, cardPhone, cash ? '' : new Date().toISOString());
+  const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + '\n👤 ' + customer + '\n📞 ' + phone + '\n📱 ' + p.name + ' — ' + money(p.price) +
+    (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')\n🔒 Pasport va karta admin panelda');
   adminIds().forEach(id => notify(id, msg));
   res.json({ id: r.lastInsertRowid, status: 'new' });
 });
 
 app.get('/api/applications/mine', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(403).json({ error: 'Bu bo‘lim Telegram foydalanuvchilari uchun.' });
-  res.json(db.prepare('SELECT a.id,a.months,a.down,a.status,a.note,a.created_at,a.total,a.monthly,p.name AS product,p.price AS price FROM applications a LEFT JOIN products p ON a.product_id=p.id WHERE a.telegram_id=? ORDER BY a.id DESC').all(String(req.user.id)));
+  res.json(db.prepare('SELECT a.id,a.months,a.down,a.status,a.note,a.created_at,a.total,a.monthly,a.pay_type,p.name AS product,p.price AS price FROM applications a LEFT JOIN products p ON a.product_id=p.id WHERE a.telegram_id=? ORDER BY a.id DESC').all(String(req.user.id)));
 });
 
 /* ---------- Admin API ---------- */
@@ -223,7 +244,7 @@ app.get('/api/admin', auth, admin, (req, res) => {
   res.json({
     products: db.prepare('SELECT * FROM products ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
-    applications: db.prepare('SELECT a.*,p.name AS product FROM applications a LEFT JOIN products p ON a.product_id=p.id ORDER BY a.id DESC').all(),
+    applications: db.prepare('SELECT a.*,p.name AS product FROM applications a LEFT JOIN products p ON a.product_id=p.id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc) })),
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'),
@@ -231,7 +252,7 @@ app.get('/api/admin', auth, admin, (req, res) => {
   });
 });
 
-const validImage = s => /^https:\/\/\S+$/i.test(s) && s.length <= 500;
+const validImage = s => (/^https:\/\/\S+$/i.test(s) || /^\/img\/\d+$/.test(s)) && s.length <= 500;
 function parseImages(v) {
   const arr = (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => String(x).trim()).filter(Boolean);
   return arr.length <= 6 && arr.every(validImage) ? arr : null;
@@ -321,6 +342,22 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/admin/upload', auth, admin, (req, res) => {
+  const d = String((req.body || {}).data || '');
+  if (!d || d.length > 900000 || !/^[A-Za-z0-9+/=]+$/.test(d)) return res.status(400).json({ error: 'Rasm noto‘g‘ri yoki juda katta.' });
+  if (Buffer.from(d.slice(0, 8), 'base64')[0] !== 0xff) return res.status(400).json({ error: 'Faqat rasm (JPEG) qabul qilinadi.' });
+  res.json({ url: '/img/' + db.prepare('INSERT INTO images(data) VALUES(?)').run(d).lastInsertRowid });
+});
+app.get('/img/:id', (req, res) => {
+  const r = db.prepare('SELECT data FROM images WHERE id=?').get(Number(req.params.id));
+  if (!r) return res.status(404).end();
+  res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' }).send(Buffer.from(r.data, 'base64'));
+});
+app.get('/api/admin/applications/:id/secret', auth, admin, (req, res) => {
+  const a = db.prepare('SELECT passport_enc,card_enc FROM applications WHERE id=?').get(Number(req.params.id));
+  if (!a || !a.card_enc) return res.status(404).json({ error: 'Maxfiy ma’lumot yo‘q.' });
+  res.json({ passport: dec(a.passport_enc), card: dec(a.card_enc) });
+});
 app.post('/api/admin/backup', auth, admin, async (req, res) => {
   if (!bot) return res.status(503).json({ error: 'Bot ulanmagan (BOT_TOKEN va WEBAPP_URL tekshiring).' });
   if (!adminIds().length) return res.status(503).json({ error: 'ADMIN_IDS sozlanmagan.' });

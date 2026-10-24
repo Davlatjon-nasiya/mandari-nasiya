@@ -50,6 +50,7 @@ db.exec('CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY AUTOINCREMENT,
 for (const [c, d] of [['pay_type', "'installment'"], ['passport_enc', "''"], ['card_enc', "''"], ['card_last4', "''"], ['card_phone', "''"], ['consent_at', "''"]])
   if (!appCols.includes(c)) db.exec('ALTER TABLE applications ADD COLUMN ' + c + ' TEXT NOT NULL DEFAULT ' + d);
 if (!appCols.includes('note')) db.exec("ALTER TABLE applications ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+db.exec("UPDATE applications SET passport_enc='', card_enc='', card_last4='', card_phone='' WHERE passport_enc!='' OR card_enc!=''"); // pasport/karta ma’lumotlari endi yig‘ilmaydi — eskilari o‘chiriladi
 
 const getSetting = (k, d = '') => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? r.value : d; };
 const setSetting = (k, v) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, String(v));
@@ -63,6 +64,8 @@ const shape = p => { let im = []; try { im = JSON.parse(p.images || '[]'); } cat
 const dataKey = crypto.createHash('sha256').update(process.env.DATA_KEY || ('mandarin|' + (process.env.BOT_TOKEN || 'local'))).digest();
 const enc = t => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', dataKey, iv), e = Buffer.concat([c.update(String(t), 'utf8'), c.final()]); return [iv, c.getAuthTag(), e].map(x => x.toString('base64')).join('.'); };
 const dec = v => { try { const [iv, tag, e] = String(v).split('.').map(x => Buffer.from(x, 'base64')); const d = crypto.createDecipheriv('aes-256-gcm', dataKey, iv); d.setAuthTag(tag); return Buffer.concat([d.update(e), d.final()]).toString('utf8'); } catch (_) { return ''; } };
+const normPass = v => String(v || '').toUpperCase().replace(/[АВСЕКМНОРТХУ]/g, c => ({ 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X', 'У': 'Y' })[c]).replace(/[^A-Z0-9]/g, '').slice(0, 12);
+const passOk = s => /^[A-Z0-9]{7,12}$/.test(s) && (s.match(/\d/g) || []).length >= 6;
 const luhn = n => { let x = 0, a = false; for (let i = n.length - 1; i >= 0; i--) { let d = +n[i]; if (a) { d *= 2; if (d > 9) d -= 9; } x += d; a = !a; } return x % 10 === 0; };
 const STATUSES = ['new', 'review', 'approved', 'rejected'];
 const STATUS_UZ = { new: 'Yangi', review: 'Ko‘rib chiqilmoqda', approved: 'Tasdiqlandi', rejected: 'Rad etildi' };
@@ -213,14 +216,7 @@ app.post('/api/applications', auth, (req, res) => {
     months = Number(b.months); down = Number(b.down || 0);
     if (!TERMS.includes(months)) return bad('Muddat noto‘g‘ri.');
     if (!Number.isSafeInteger(down) || down < 0 || down >= p.price) return bad('Boshlang‘ich to‘lov 0 dan telefon narxigacha (narxdan kam) bo‘lsin.');
-    const passport = String(b.passport || '').replace(/\s/g, '').toUpperCase(), card = String(b.card || '').replace(/\D/g, '');
-    cardPhone = String(b.card_phone || '').trim();
-    if (!/^[A-Z]{2}\d{7}$/.test(passport)) return bad('Pasport seriya va raqamini kiriting. Masalan: AA1234567');
-    if (card.length !== 16 || !luhn(card)) return bad('Karta raqami (16 xona) noto‘g‘ri.');
-    if (!PHONE_RE.test(cardPhone)) return bad('Kartaga ulangan telefon raqamini to‘g‘ri kiriting.');
-    if (b.consent !== true) return bad('Ma’lumotlarni qayta ishlashga rozilik kerak.');
     total = Math.ceil((p.price - down) * (1 + markupFor(months) / 100)); monthly = Math.ceil(total / months);
-    passEnc = enc(passport); cardEnc = enc(card); last4 = card.slice(-4);
   }
   const open = db.prepare("SELECT COUNT(*) c FROM applications WHERE telegram_id=? AND status IN ('new','review')").get(String(req.user.id)).c;
   if (open >= 5) return res.status(429).json({ error: 'Sizda 5 ta ko‘rib chiqilayotgan ariza bor. Javobini kuting.' });
@@ -229,7 +225,7 @@ app.post('/api/applications', auth, (req, res) => {
   const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,passport_enc,card_enc,card_last4,card_phone,consent_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(String(req.user.id), customer, phone, p.id, months, down, total, monthly, cash ? 'cash' : 'installment', passEnc, cardEnc, last4, cardPhone, cash ? '' : new Date().toISOString());
   const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + '\n👤 ' + customer + '\n📞 ' + phone + '\n📱 ' + p.name + ' — ' + money(p.price) +
-    (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')\n🔒 Pasport va karta admin panelda');
+    (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')');
   adminIds().forEach(id => notify(id, msg));
   res.json({ id: r.lastInsertRowid, status: 'new' });
 });
@@ -359,11 +355,6 @@ app.get('/img/:id', (req, res) => {
   const r = db.prepare('SELECT data FROM images WHERE id=?').get(Number(req.params.id));
   if (!r) return res.status(404).end();
   res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' }).send(Buffer.from(r.data, 'base64'));
-});
-app.get('/api/admin/applications/:id/secret', auth, admin, (req, res) => {
-  const a = db.prepare('SELECT passport_enc,card_enc FROM applications WHERE id=?').get(Number(req.params.id));
-  if (!a || !a.card_enc) return res.status(404).json({ error: 'Maxfiy ma’lumot yo‘q.' });
-  res.json({ passport: dec(a.passport_enc), card: dec(a.card_enc) });
 });
 app.post('/api/admin/backup', auth, admin, async (req, res) => {
   if (!bot) return res.status(503).json({ error: 'Bot ulanmagan (BOT_TOKEN va WEBAPP_URL tekshiring).' });

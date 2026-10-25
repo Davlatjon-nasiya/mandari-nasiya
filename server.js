@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS users(telegram_id TEXT PRIMARY KEY, name TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS favorites(telegram_id TEXT NOT NULL, product_id INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(telegram_id, product_id));
 CREATE TABLE IF NOT EXISTS support_msgs(admin_chat TEXT NOT NULL, admin_msg INTEGER NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY(admin_chat, admin_msg));
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT DEFAULT CURRENT_TIMESTAMP, actor TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT, app_id INTEGER NOT NULL, amount INTEGER NOT NULL, paid_at TEXT DEFAULT CURRENT_TIMESTAMP, note TEXT NOT NULL DEFAULT '', taker TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS notify_me(telegram_id TEXT NOT NULL, product_id INTEGER NOT NULL, PRIMARY KEY(telegram_id, product_id));
 `);
 for (const [c, d] of [['pay_type', "'installment'"], ['passport_enc', "''"], ['card_enc', "''"], ['card_last4', "''"], ['card_phone', "''"], ['consent_at', "''"], ['approved_at', "''"], ['last_pay_remind', "''"]])
   if (!appCols.includes(c)) db.exec('ALTER TABLE applications ADD COLUMN ' + c + ' TEXT NOT NULL DEFAULT ' + d);
@@ -66,7 +68,7 @@ if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting(
 const TERMS = [3, 6, 12, 18, 24];
 const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}')); if (o[m] !== undefined && Number.isFinite(Number(o[m]))) return Number(o[m]); } catch (_) {} return Number(getSetting('markup', '50')); };
 const colsOf = t => db.prepare('PRAGMA table_info(' + t + ')').all().map(c => c.name);
-for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'delivery', "TEXT NOT NULL DEFAULT 'pickup'"], ['applications', 'branch', "TEXT NOT NULL DEFAULT ''"], ['applications', 'address', "TEXT NOT NULL DEFAULT ''"], ['applications', 'geo', "TEXT NOT NULL DEFAULT ''"], ['applications', 'contract_sent', "TEXT NOT NULL DEFAULT ''"]])
+for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'delivery', "TEXT NOT NULL DEFAULT 'pickup'"], ['applications', 'branch', "TEXT NOT NULL DEFAULT ''"], ['applications', 'address', "TEXT NOT NULL DEFAULT ''"], ['applications', 'geo', "TEXT NOT NULL DEFAULT ''"], ['applications', 'contract_sent', "TEXT NOT NULL DEFAULT ''"], ['applications', 'last_overdue_remind', "TEXT NOT NULL DEFAULT ''"]])
   if (!colsOf(t).includes(c)) db.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + d);
 const getBranches = () => getSetting('branches').split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0]).map(x => ({ name: x[0], address: x[1] || '', phone: x[2] || '' }));
 const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
@@ -211,7 +213,7 @@ app.use((req, res, next) => { // admin amallari tarixi + tasdiqlanganda shartnom
     if (res.statusCode >= 400 || !req.user) return;
     const b = req.body || {}, m = req.path.match(/\/(applications|products|customers)\/(\d+)/), id = m && m[2];
     let t = req.method + ' ' + req.path;
-    if (m && m[1] === 'applications') t = /\/contract$/.test(req.path) ? 'Ariza #' + id + ': shartnoma yuborildi' : 'Ariza #' + id + ': ' + (STATUS_UZ[b.status] || b.status) + (b.note ? ' · izoh: ' + String(b.note).slice(0, 60) : '');
+    if (m && m[1] === 'applications') t = /\/payments$/.test(req.path) ? 'Ariza #' + id + ': to‘lov qabul qilindi ' + money(b.amount) : /\/contract$/.test(req.path) ? 'Ariza #' + id + ': shartnoma yuborildi' : 'Ariza #' + id + ': ' + (STATUS_UZ[b.status] || b.status) + (b.note ? ' · izoh: ' + String(b.note).slice(0, 60) : '');
     else if (m && m[1] === 'products') t = req.method === 'DELETE' ? 'Telefon #' + id + ' o‘chirildi' : 'Telefon #' + id + ' o‘zgartirildi' + (b.name ? ' (' + String(b.name).slice(0, 40) + ')' : '');
     else if (m && m[1] === 'customers') t = 'Mijoz ' + id + ': ' + (b.risky ? 'ishonchsiz' : 'oddiy') + (b.note ? ' · izoh' : '');
     else if (/\/products$/.test(req.path)) t = 'Telefon qo‘shildi: ' + String(b.name || '').slice(0, 40);
@@ -223,13 +225,49 @@ app.use((req, res, next) => { // admin amallari tarixi + tasdiqlanganda shartnom
   });
   next();
 });
+function debtInfo(a) {
+  const paid = db.prepare('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE app_id=?').get(a.id).s, left = Math.max(0, a.total - paid);
+  const now = new Date(Date.now() + 5 * 3600 * 1000), st = new Date(new Date(a.approved_at.replace(' ', 'T') + 'Z').getTime() + 5 * 3600 * 1000);
+  const dueDate = i => new Date(Date.UTC(st.getUTCFullYear(), st.getUTCMonth() + i, Math.min(st.getUTCDate(), 28)));
+  let n = 0; while (n < a.months && dueDate(n + 1) <= now) n++;
+  const overdue = Math.max(0, Math.min(a.total, n * a.monthly) - paid), kd = dueDate(Math.min(a.months, Math.floor(paid / a.monthly) + 1));
+  const f = d => ('0' + d.getUTCDate()).slice(-2) + '.' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '.' + d.getUTCFullYear();
+  return { paid, left, overdue, days: overdue > 0 ? Math.max(1, Math.floor((now - kd) / 864e5)) : 0, next: left > 0 ? f(kd) : '' };
+}
+const payInfo = a => { if (a.pay_type !== 'installment' || !a.approved_at || !a.months || !a.monthly) return {}; const d = debtInfo(a); return { paid: d.paid, left: d.left, overdue: d.overdue, od_days: d.days, next_due: d.next }; };
+function notifyAll(ids, text) { if (bot) (async () => { for (const id of ids) { await sendUser(id, text, appBtn()); await new Promise(r => setTimeout(r, 70)); } })(); }
+function productHooks(prev, now) { // telefon qaytdi / narx tushdi xabarlari
+  if (!bot) return;
+  if (prev.stock < 1 && now.stock > 0) {
+    const ids = db.prepare('SELECT telegram_id id FROM notify_me WHERE product_id=?').all(now.id).map(r => r.id);
+    db.prepare('DELETE FROM notify_me WHERE product_id=?').run(now.id);
+    notifyAll(ids, '🔔 ' + now.name + ' omborga keldi!\n' + money(now.price) + ' dan.');
+  }
+  if (now.price < prev.price) {
+    const ids = db.prepare('SELECT telegram_id id FROM favorites WHERE product_id=?').all(now.id).map(r => r.id).slice(0, 300);
+    notifyAll(ids, '📉 Narx tushdi!\n📱 ' + now.name + '\n' + money(prev.price) + ' → ' + money(now.price) + '\n12 oy: ' + money(Math.ceil(now.price * (1 + markupFor(12) / 100) / 12)) + '/oy');
+  }
+}
+async function runOverdue() { // muddati o‘tgan to‘lov eslatmasi (3 kunda bir marta)
+  const t = new Date(Date.now() + 5 * 3600 * 1000);
+  if (!bot || t.getUTCHours() < 10 || t.getUTCHours() >= 20) return;
+  const today = t.toISOString().slice(0, 10);
+  const apps = db.prepare("SELECT * FROM applications WHERE status IN ('approved','preparing','shipping','delivered') AND pay_type='installment' AND months>0 AND approved_at!='' AND (last_overdue_remind='' OR julianday(?)-julianday(last_overdue_remind)>=3)").all(today);
+  for (const a of apps) {
+    const d = debtInfo(a);
+    if (d.overdue <= 0) continue;
+    await sendUser(a.telegram_id, '⚠️ To‘lov muddati o‘tgan.\n💳 To‘lashingiz kerak: ' + money(d.overdue) + '\nQolgan jami: ' + money(d.left) + '\nIltimos, imkon qadar tezroq to‘lang yoki biz bilan bog‘laning.');
+    db.prepare('UPDATE applications SET last_overdue_remind=? WHERE id=?').run(today, a.id);
+    await new Promise(r => setTimeout(r, 80));
+  }
+}
 async function sendUser(id, text, markup) {
   try { await bot.sendMessage(id, text, markup ? { reply_markup: markup } : {}); return true; }
   catch (e) { if (/403|blocked|deactivated|chat not found/i.test(e.message)) db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(String(id)); return false; }
 }
 const appBtn = () => ({ inline_keyboard: [[{ text: '📱 Ilovani ochish', web_app: { url: process.env.WEBAPP_URL } }]] });
 /* ---------- Zaxira nusxa (Telegram orqali saqlash va tiklash) ---------- */
-const makeBackup = () => JSON.stringify({ v: 1, at: new Date().toISOString(), products: db.prepare('SELECT * FROM products').all(), applications: db.prepare('SELECT * FROM applications').all(), settings: db.prepare('SELECT * FROM settings').all(), images: db.prepare('SELECT * FROM images').all(), users: db.prepare('SELECT * FROM users').all(), favorites: db.prepare('SELECT * FROM favorites').all() });
+const makeBackup = () => JSON.stringify({ v: 1, at: new Date().toISOString(), products: db.prepare('SELECT * FROM products').all(), applications: db.prepare('SELECT * FROM applications').all(), settings: db.prepare('SELECT * FROM settings').all(), images: db.prepare('SELECT * FROM images').all(), users: db.prepare('SELECT * FROM users').all(), favorites: db.prepare('SELECT * FROM favorites').all(), payments: db.prepare('SELECT * FROM payments').all(), notify_me: db.prepare('SELECT * FROM notify_me').all() });
 const insertRows = (table, rows) => {
   const cols = db.prepare('PRAGMA table_info(' + table + ')').all().map(c => c.name);
   for (const r of rows) {
@@ -239,8 +277,8 @@ const insertRows = (table, rows) => {
 };
 const restoreBackup = db.transaction(data => {
   if (!data || !Array.isArray(data.products) || !Array.isArray(data.applications) || !Array.isArray(data.settings)) throw new Error('Zaxira fayli noto‘g‘ri.');
-  db.exec('DELETE FROM applications; DELETE FROM products; DELETE FROM settings; DELETE FROM images; DELETE FROM users; DELETE FROM favorites;');
-  insertRows('products', data.products); insertRows('applications', data.applications); insertRows('settings', data.settings); insertRows('images', data.images || []); insertRows('users', data.users || []); insertRows('favorites', data.favorites || []);
+  db.exec('DELETE FROM applications; DELETE FROM products; DELETE FROM settings; DELETE FROM images; DELETE FROM users; DELETE FROM favorites; DELETE FROM payments; DELETE FROM notify_me;');
+  insertRows('products', data.products); insertRows('applications', data.applications); insertRows('settings', data.settings); insertRows('images', data.images || []); insertRows('users', data.users || []); insertRows('favorites', data.favorites || []); insertRows('payments', data.payments || []); insertRows('notify_me', data.notify_me || []);
   if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting('markup', '50');
 });
 async function sendBackup() {
@@ -354,8 +392,9 @@ app.post('/api/applications', auth, (req, res) => {
 
 app.get('/api/applications/mine', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(403).json({ error: 'Bu bo‘lim Telegram foydalanuvchilari uchun.' });
-  res.json(db.prepare('SELECT a.id,a.months,a.down,a.status,a.note,a.created_at,a.total,a.monthly,a.pay_type,p.name AS product,p.price AS price FROM applications a LEFT JOIN products p ON a.product_id=p.id WHERE a.telegram_id=? ORDER BY a.id DESC').all(String(req.user.id)));
+  res.json(db.prepare('SELECT a.id,a.months,a.down,a.status,a.note,a.created_at,a.total,a.monthly,a.pay_type,a.approved_at,a.contract_sent,p.name AS product,p.price AS price FROM applications a LEFT JOIN products p ON a.product_id=p.id WHERE a.telegram_id=? ORDER BY a.id DESC').all(String(req.user.id)).map(x => ({ ...x, ...payInfo(x) })));
 });
+
 
 /* ---------- Admin API ---------- */
 app.get('/api/admin', auth, staff, (req, res) => {
@@ -363,7 +402,7 @@ app.get('/api/admin', auth, staff, (req, res) => {
   res.json({
     products: db.prepare('SELECT * FROM products ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
-    applications: db.prepare('SELECT a.*,p.name AS product,COALESCE(u.risky,0) AS risky FROM applications a LEFT JOIN products p ON a.product_id=p.id LEFT JOIN users u ON u.telegram_id=a.telegram_id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc) })),
+    applications: db.prepare('SELECT a.*,p.name AS product,COALESCE(u.risky,0) AS risky FROM applications a LEFT JOIN products p ON a.product_id=p.id LEFT JOIN users u ON u.telegram_id=a.telegram_id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc), ...payInfo(r) })),
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
@@ -413,6 +452,7 @@ app.patch('/api/admin/products/:id', auth, admin, (req, res) => {
   const old = Number(b.old_price === undefined ? p.old_price : b.old_price || 0), until = String(b.sale_until === undefined ? p.sale_until : b.sale_until);
   if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || ![0, 1].includes(active) || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
   db.prepare('UPDATE products SET name=?,price=?,stock=?,active=?,image=?,images=?,description=?,category=?,variants=?,old_price=?,sale_until=? WHERE id=?').run(name, price, stock, active, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until, id);
+  productHooks(p, { id, name, price, stock });
   res.json({ ok: true });
 });
 
@@ -542,6 +582,45 @@ app.get('/api/admin/applications/:id/contract.pdf', auth, staff, async (req, res
   if (!a || a.pay_type !== 'installment') return res.status(404).json({ error: 'Nasiya arizasi topilmadi.' });
   res.set('Content-Type', 'application/pdf').send(await makeContract(a));
 });
+app.post('/api/admin/applications/:id/payments', auth, staff, (req, res) => {
+  const a = db.prepare('SELECT * FROM applications WHERE id=?').get(Number(req.params.id));
+  if (!a || a.pay_type !== 'installment' || !a.approved_at) return res.status(400).json({ error: 'To‘lov faqat tasdiqlangan nasiya arizasiga qabul qilinadi.' });
+  const b = req.body || {}, amount = Number(b.amount), left = debtInfo(a).left, u = req.user || {};
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > left) return res.status(400).json({ error: 'Summa 1 dan ' + money(left) + ' gacha bo‘lsin.' });
+  db.prepare('INSERT INTO payments(app_id,amount,note,taker) VALUES(?,?,?,?)').run(a.id, amount, String(b.note || '').slice(0, 100), req.authType === 'web' ? 'Veb-admin' : String(u.first_name || u.id));
+  notify(a.telegram_id, '✅ To‘lov qabul qilindi: ' + money(amount) + '\nQolgan: ' + money(left - amount));
+  res.json({ ok: true, left: left - amount });
+});
+app.get('/api/admin/debtors', auth, staff, (req, res) => {
+  const rows = db.prepare("SELECT a.*, p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id WHERE a.pay_type='installment' AND a.approved_at!='' AND a.months>0 AND a.status IN ('approved','preparing','shipping','delivered')").all();
+  res.json(rows.map(a => ({ a, d: debtInfo(a) })).filter(x => x.d.overdue > 0).sort((x, y) => y.d.days - x.d.days).map(({ a, d }) => ({ id: a.id, customer: a.customer, phone: a.phone, product: a.pname, overdue: d.overdue, days: d.days, left: d.left })));
+});
+app.get('/api/admin/stats', auth, admin, (req, res) => {
+  const apps = db.prepare("SELECT * FROM applications WHERE pay_type='installment' AND approved_at!='' AND months>0 AND status IN ('approved','preparing','shipping','delivered')").all();
+  let outstanding = 0, overdue = 0;
+  for (const a of apps) { const d = debtInfo(a); outstanding += d.left; overdue += d.overdue; }
+  const monthly = [];
+  for (let i = 5; i >= 0; i--) { const d = new Date(Date.now() + 5 * 3600 * 1000); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - i); const m = d.toISOString().slice(0, 7); monthly.push({ m, sum: db.prepare('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE substr(paid_at,1,7)=?').get(m).s }); }
+  const c = db.prepare("SELECT SUM(status IN ('approved','preparing','shipping','delivered')) ok, SUM(status='rejected') no FROM applications").get(), ok = c.ok || 0, no = c.no || 0;
+  res.json({ paid: db.prepare('SELECT COALESCE(SUM(amount),0) s FROM payments').get().s, outstanding, overdue, rate: ok + no ? Math.round(ok * 100 / (ok + no)) : 0, monthly, top: db.prepare('SELECT p.name, COUNT(*) c FROM applications a JOIN products p ON p.id=a.product_id GROUP BY a.product_id ORDER BY c DESC LIMIT 5').all() });
+});
+app.post('/api/notify/:id', auth, (req, res) => {
+  if (req.authType !== 'telegram') return res.status(403).json({ error: 'Faqat Telegram ichida.' });
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT 1 FROM products WHERE id=?').get(id)) return res.status(404).json({ error: 'Topilmadi.' });
+  db.prepare('INSERT OR IGNORE INTO notify_me(telegram_id,product_id) VALUES(?,?)').run(String(req.user.id), id);
+  res.json({ ok: true });
+});
+const cReq = new Map();
+app.post('/api/applications/:id/contract', auth, async (req, res) => {
+  if (req.authType !== 'telegram') return res.status(403).json({ error: 'Faqat Telegram ichida.' });
+  const id = Number(req.params.id), a = db.prepare('SELECT * FROM applications WHERE id=? AND telegram_id=?').get(id, String(req.user.id));
+  if (!a || a.pay_type !== 'installment' || !TAKEN.includes(a.status)) return res.status(404).json({ error: 'Shartnoma topilmadi (ariza hali tasdiqlanmagan).' });
+  if (!PDFDocument || !bot) return res.status(503).json({ error: 'Shartnoma xizmati hozir mavjud emas.' });
+  if (Date.now() - (cReq.get(id) || 0) < 20000) return res.status(429).json({ error: 'Biroz kuting va qayta urinib ko‘ring.' });
+  cReq.set(id, Date.now());
+  res.json({ ok: await sendContract(id, req.user.id) });
+});
 app.post('/api/admin/upload', auth, admin, (req, res) => {
   const d = String((req.body || {}).data || '');
   if (!d || d.length > 900000 || !/^[A-Za-z0-9+/=]+$/.test(d)) return res.status(400).json({ error: 'Rasm noto‘g‘ri yoki juda katta.' });
@@ -580,6 +659,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
   bot.onText(/\/start(?:\s+(\w+))?/, async (msg, m) => {
     try {
       upsertUser(msg.from);
+      if (m && /^p\d+$/.test(m[1] || '')) return bot.sendMessage(msg.chat.id, '📱 Telefonni ko‘rish uchun tugmani bosing 👇', { reply_markup: { inline_keyboard: [[{ text: '📱 Ochish', web_app: { url: url + (url.includes('?') ? '&' : '?') + 'p=' + m[1].slice(1) } }]] } });
       if (m && m[1] === 'support') return bot.sendMessage(msg.chat.id, '🆘 Texnik yordam\nSavolingizni shu yerga yozing (matn yoki rasm) — adminga yuboraman, javob shu chatga keladi.');
       await bot.sendMessage(msg.chat.id, '🍊 Mandarin Nasiya', { reply_markup: { remove_keyboard: true } });
       await bot.sendMessage(msg.chat.id, 'Telefonlarni ko‘ring, oylik to‘lovni hisoblang va ariza yuboring.', {
@@ -644,6 +724,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
   }
   setTimeout(() => runReminders().catch(e => console.error('Reminders:', e.message)), 90000);
   setInterval(() => runReminders().catch(e => console.error('Reminders:', e.message)), 30 * 60 * 1000);
+  setInterval(() => runOverdue().catch(e => console.error('Overdue:', e.message)), 60 * 60 * 1000);
   bot.on('document', async msg => { // admin zaxira faylini yuborsa — tiklanadi
     try {
       if (msg.chat.type !== 'private' || !adminIds().includes(String(msg.from.id))) return;

@@ -13,6 +13,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 /* ---------- Database ---------- */
 const db = new Database(process.env.DB_PATH || path.join(__dirname, 'mandarin.db'));
+if (!process.env.DB_PATH) console.warn('⚠️ DB_PATH sozlanmagan: baza vaqtinchalik diskda. Doimiy disk ulang va DB_PATH=/data/mandarin.db qo‘ying (Telegram zaxirasi himoya qiladi).');
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.exec(`
@@ -51,6 +52,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS users(telegram_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', last_remind TEXT NOT NULL DEFAULT '', blocked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS favorites(telegram_id TEXT NOT NULL, product_id INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(telegram_id, product_id));
 CREATE TABLE IF NOT EXISTS support_msgs(admin_chat TEXT NOT NULL, admin_msg INTEGER NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY(admin_chat, admin_msg));
+CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT DEFAULT CURRENT_TIMESTAMP, actor TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '');
 `);
 for (const [c, d] of [['pay_type', "'installment'"], ['passport_enc', "''"], ['card_enc', "''"], ['card_last4', "''"], ['card_phone', "''"], ['consent_at', "''"], ['approved_at', "''"], ['last_pay_remind', "''"]])
   if (!appCols.includes(c)) db.exec('ALTER TABLE applications ADD COLUMN ' + c + ' TEXT NOT NULL DEFAULT ' + d);
@@ -64,8 +66,9 @@ if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting(
 const TERMS = [3, 6, 12, 18, 24];
 const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}')); if (o[m] !== undefined && Number.isFinite(Number(o[m]))) return Number(o[m]); } catch (_) {} return Number(getSetting('markup', '50')); };
 const colsOf = t => db.prepare('PRAGMA table_info(' + t + ')').all().map(c => c.name);
-for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0']])
+for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'delivery', "TEXT NOT NULL DEFAULT 'pickup'"], ['applications', 'branch', "TEXT NOT NULL DEFAULT ''"], ['applications', 'address', "TEXT NOT NULL DEFAULT ''"], ['applications', 'geo', "TEXT NOT NULL DEFAULT ''"], ['applications', 'contract_sent', "TEXT NOT NULL DEFAULT ''"]])
   if (!colsOf(t).includes(c)) db.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + d);
+const getBranches = () => getSetting('branches').split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0]).map(x => ({ name: x[0], address: x[1] || '', phone: x[2] || '' }));
 const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
 const markupsMap = () => Object.fromEntries(TERMS.map(t => [t, markupFor(t)]));
 const shape = p => {
@@ -158,6 +161,68 @@ let bot = null, botUser = '';
 const notify = (chatId, text) => { if (bot && chatId && /^\d+$/.test(String(chatId))) bot.sendMessage(chatId, text).catch(e => console.error('Notify:', e.message)); };
 const money = n => Number(n).toLocaleString('ru-RU') + ' so‘m';
 
+let PDFDocument = null;
+try { PDFDocument = require('pdfkit'); } catch (_) { console.warn('pdfkit o‘rnatilmagan — shartnoma PDF yuborilmaydi (package.json ni yangilang).'); }
+const CY = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'j', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'x', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sh', ъ: "'", ы: 'i', ь: '', э: 'e', ю: 'yu', я: 'ya', ў: "o'", қ: 'q', ғ: "g'", ҳ: 'h' };
+const asc = v => String(v == null ? '' : v).replace(/[‘’ʻʼ`´]/g, "'").replace(/[А-Яа-яЁёЎўҚқҒғҲҳ]/g, c => { const l = CY[c.toLowerCase()]; return l === undefined ? '?' : c === c.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1); }).replace(/[^\x20-\x7E\n]/g, '');
+function makeContract(a) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 50 }), chunks = [];
+    doc.on('data', c => chunks.push(c)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
+    const M = n => asc(Number(n).toLocaleString('ru-RU').replace(/\s/g, ' ') + " so'm"), now = new Date(Date.now() + 5 * 3600 * 1000);
+    const d2 = d => ('0' + d.getUTCDate()).slice(-2) + '.' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '.' + d.getUTCFullYear();
+    const co = asc(getSetting('company') || 'Mandarin Nasiya'), price = a.total + a.down;
+    doc.font('Helvetica-Bold').fontSize(16).text('NASIYA SHARTNOMASI № ' + a.id, { align: 'center' }).moveDown(0.3);
+    doc.font('Helvetica').fontSize(10).text('Sana: ' + d2(now), { align: 'center' }).moveDown();
+    doc.fontSize(11).font('Helvetica-Bold').text('1. Tomonlar').font('Helvetica');
+    doc.text('Sotuvchi: ' + co + (getSetting('contact_phone') ? ', tel: ' + asc(getSetting('contact_phone')) : '') + (getSetting('contact_address') ? ', manzil: ' + asc(getSetting('contact_address')) : ''));
+    doc.text('Xaridor: ' + asc(a.customer) + ', tel: ' + asc(a.phone) + (a.delivery === 'delivery' ? ', yetkazish manzili: ' + asc(a.address) : ', olib ketish filiali: ' + asc(a.branch || 'dokon'))).moveDown();
+    doc.font('Helvetica-Bold').text('2. Shartnoma predmeti va narx').font('Helvetica');
+    doc.text('Tovar: ' + asc(a.pname) + (a.variant ? ' (' + asc(a.variant) + ')' : '') + '.');
+    doc.text('Boshlangich tolov (avans): ' + M(a.down) + (a.trade_model ? " (shundan eski telefon '" + asc(a.trade_model) + "' ~ " + M(a.trade_value) + ')' : '') + '.');
+    doc.text('Muddat: ' + a.months + ' oy. Oylik tolov: ' + M(a.monthly) + '. Nasiya bo\'yicha jami: ' + M(a.total) + '. Umumiy qiymat: ' + M(price) + '.').moveDown();
+    doc.font('Helvetica-Bold').text('3. Tolov jadvali').font('Helvetica');
+    const st = a.approved_at ? new Date(new Date(a.approved_at.replace(' ', 'T') + 'Z').getTime() + 5 * 3600 * 1000) : now;
+    for (let i = 1; i <= a.months; i++) { const x = new Date(Date.UTC(st.getUTCFullYear(), st.getUTCMonth() + i, Math.min(st.getUTCDate(), 28))); doc.text(i + '. ' + d2(x) + ' — ' + M(a.monthly)); }
+    doc.moveDown().font('Helvetica-Bold').text('4. Tomonlarning majburiyatlari').font('Helvetica');
+    ['Sotuvchi tovarni Xaridorga topshiradi, Xaridor esa tolovlarni yuqoridagi jadval boyicha oz vaqtida amalga oshiradi.',
+      'Xaridor tovarni topshirilgan paytdan boshlab saqlash va ehtiyot qilish uchun javobgar.',
+      'Tolov kechiktirilgan taqdirda tomonlar kelishuviga muvofiq choralar korilishi mumkin.',
+      'Shartnoma shartlari ozgartirilsa, tomonlarning yozma yoki elektron roziligi talab etiladi.'].forEach((t, i) => doc.text('4.' + (i + 1) + '. ' + t));
+    doc.moveDown(2).text('Sotuvchi: ______________________            Xaridor: ______________________');
+    doc.end();
+  });
+}
+async function sendContract(id, extraTo, onlyIfNew) {
+  if (!bot || !PDFDocument) return false;
+  const a = db.prepare('SELECT a.*, p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id WHERE a.id=?').get(id);
+  if (!a || a.pay_type !== 'installment' || (onlyIfNew && a.contract_sent)) return false;
+  const buf = await makeContract(a), fo = { filename: 'shartnoma-' + a.id + '.pdf', contentType: 'application/pdf' };
+  let ok = false;
+  for (const t of (extraTo ? [String(extraTo)] : [a.telegram_id, ...staffIds()])) {
+    try { await bot.sendDocument(t, buf, { caption: t === a.telegram_id ? '📄 Nasiya shartnomangiz (#' + a.id + '). Iltimos, o‘qib chiqing.' : '📄 Shartnoma #' + a.id + ' — ' + a.customer }, fo); ok = true; } catch (e) { console.error('Contract:', e.message); }
+  }
+  if (ok && !extraTo) db.prepare("UPDATE applications SET contract_sent=datetime('now') WHERE id=?").run(id);
+  return ok;
+}
+const audit = (req, text) => { try { const u = req.user || {}; db.prepare('INSERT INTO audit(actor,role,text) VALUES(?,?,?)').run(req.authType === 'web' ? 'Veb-admin' : [u.first_name, u.username ? '@' + u.username : ''].filter(Boolean).join(' ') + ' (' + u.id + ')', roleOf(req), text); } catch (_) {} };
+app.use((req, res, next) => { // admin amallari tarixi + tasdiqlanganda shartnoma
+  if (req.method !== 'GET' && req.path.startsWith('/api/admin/') && !/\/(login|upload|backup)$/.test(req.path)) res.on('finish', () => {
+    if (res.statusCode >= 400 || !req.user) return;
+    const b = req.body || {}, m = req.path.match(/\/(applications|products|customers)\/(\d+)/), id = m && m[2];
+    let t = req.method + ' ' + req.path;
+    if (m && m[1] === 'applications') t = /\/contract$/.test(req.path) ? 'Ariza #' + id + ': shartnoma yuborildi' : 'Ariza #' + id + ': ' + (STATUS_UZ[b.status] || b.status) + (b.note ? ' · izoh: ' + String(b.note).slice(0, 60) : '');
+    else if (m && m[1] === 'products') t = req.method === 'DELETE' ? 'Telefon #' + id + ' o‘chirildi' : 'Telefon #' + id + ' o‘zgartirildi' + (b.name ? ' (' + String(b.name).slice(0, 40) + ')' : '');
+    else if (m && m[1] === 'customers') t = 'Mijoz ' + id + ': ' + (b.risky ? 'ishonchsiz' : 'oddiy') + (b.note ? ' · izoh' : '');
+    else if (/\/products$/.test(req.path)) t = 'Telefon qo‘shildi: ' + String(b.name || '').slice(0, 40);
+    else if (/\/settings$/.test(req.path)) t = 'Sozlamalar o‘zgardi: ' + Object.keys(b).join(', ').slice(0, 80);
+    else if (/\/broadcast$/.test(req.path)) t = 'Hammaga xabar yuborildi: ' + String(b.text || '').slice(0, 50);
+    else if (/\/export$/.test(req.path)) t = 'CSV yuklab olindi';
+    audit(req, t);
+    if (m && m[1] === 'applications' && req.method === 'PATCH' && b.status === 'approved') sendContract(Number(id), null, true).catch(e => console.error('Contract:', e.message));
+  });
+  next();
+});
 async function sendUser(id, text, markup) {
   try { await bot.sendMessage(id, text, markup ? { reply_markup: markup } : {}); return true; }
   catch (e) { if (/403|blocked|deactivated|chat not found/i.test(e.message)) db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(String(id)); return false; }
@@ -218,6 +283,7 @@ app.get('/api/catalog', (_, res) => {
     products: db.prepare('SELECT id,name,price,stock,image,images,description,category,variants,old_price,sale_until FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
     bot: botUser,
+    branches: getBranches(),
     markup: Number(getSetting('markup', '50')),
     terms: TERMS,
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
@@ -260,6 +326,11 @@ app.post('/api/applications', auth, (req, res) => {
   if (pr) price = Math.round(price * (1 - pr.percent / 100));
   if (customer.length < 2 || customer.length > 100) return bad('Ism-familiyani to‘g‘ri kiriting.');
   if (!PHONE_RE.test(phone)) return bad('Telefon raqamini to‘g‘ri kiriting. Masalan: +998 90 123 45 67');
+  const delivery = b.delivery === 'delivery' ? 'delivery' : 'pickup', brs = getBranches();
+  let branch = '', address = String(b.address || '').trim().slice(0, 200), geo = '';
+  if (/^-?\d{1,3}(\.\d+)?$/.test(String(b.lat)) && /^-?\d{1,3}(\.\d+)?$/.test(String(b.lng))) geo = b.lat + ',' + b.lng;
+  if (delivery === 'pickup') { address = ''; geo = ''; if (brs.length) { const f = brs.find(x => x.name === b.branch); if (!f) return bad('Filialni tanlang.'); branch = f.name; } }
+  else if (address.length < 5 && !geo) return bad('Yetkazish uchun manzilni yozing yoki joylashuvingizni yuboring.');
   let months = 0, down = price, total = price, monthly = 0, tradeModel = '', tradeValue = 0;
   if (!cash) {
     months = Number(b.months); tradeValue = Number(b.trade_value || 0); tradeModel = String(b.trade_model || '').trim().slice(0, 80);
@@ -272,10 +343,10 @@ app.post('/api/applications', auth, (req, res) => {
   if (db.prepare("SELECT COUNT(*) c FROM applications WHERE telegram_id=? AND status IN ('new','review')").get(uid).c >= 5) return res.status(429).json({ error: 'Sizda 5 ta ko‘rib chiqilayotgan ariza bor. Javobini kuting.' });
   const dup = db.prepare("SELECT id FROM applications WHERE telegram_id=? AND product_id=? AND variant=? AND status IN ('new','review')").get(uid, p0.id, variant);
   if (dup) return res.status(409).json({ error: 'Bu telefon uchun arizangiz allaqachon bor (#' + dup.id + ').' });
-  const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,consent_at,variant,trade_model,trade_value,promo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(uid, customer, phone, p0.id, months, down, total, monthly, cash ? 'cash' : 'installment', '', variant, tradeModel, tradeValue, pr ? pr.code : '');
+  const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,consent_at,variant,trade_model,trade_value,promo,delivery,branch,address,geo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(uid, customer, phone, p0.id, months, down, total, monthly, cash ? 'cash' : 'installment', '', variant, tradeModel, tradeValue, pr ? pr.code : '', delivery, branch, address, geo);
   const risky = db.prepare('SELECT risky FROM users WHERE telegram_id=?').get(uid);
-  const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + (risky && risky.risky ? '\n⚠️ ISHONCHSIZ deb belgilangan mijoz!' : '') + '\n👤 ' + customer + '\n📞 ' + phone + '\n📱 ' + p0.name + (variant ? ' (' + variant + ')' : '') + ' — ' + money(price) + (pr ? ' (🎟 ' + pr.code + ' −' + pr.percent + '%)' : '') +
+  const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + (risky && risky.risky ? '\n⚠️ ISHONCHSIZ deb belgilangan mijoz!' : '') + '\n👤 ' + customer + '\n📞 ' + phone + '\n' + (delivery === 'delivery' ? '🚚 Yetkazish: ' + address + (geo ? ' 📍 https://maps.google.com/?q=' + geo : '') : '🏪 Filial: ' + (branch || 'do‘kon')) + '\n📱 ' + p0.name + (variant ? ' (' + variant + ')' : '') + ' — ' + money(price) + (pr ? ' (🎟 ' + pr.code + ' −' + pr.percent + '%)' : '') +
     (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + (tradeValue ? ' (shundan eski telefon ' + tradeModel + ' ≈ ' + money(tradeValue) + ')' : '') + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')');
   staffIds().forEach(id => notify(id, msg));
   res.json({ id: r.lastInsertRowid, status: 'new' });
@@ -296,7 +367,7 @@ app.get('/api/admin', auth, staff, (req, res) => {
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
-    remind_days: Number(getSetting('remind_days', '3')), promos: getSetting('promos'), role: roleOf(req), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
+    remind_days: Number(getSetting('remind_days', '3')), promos: getSetting('promos'), role: roleOf(req), branches_raw: getSetting('branches'), company: getSetting('company'), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
   });
 });
 
@@ -420,7 +491,7 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
   if (b.contact_telegram !== undefined && !/^@?[A-Za-z0-9_]{0,32}$/.test(String(b.contact_telegram).trim()))
     return res.status(400).json({ error: 'Telegram username noto‘g‘ri (masalan @mandarin_nasiya).' });
   if (b.contact_instagram !== undefined && !/^@?[A-Za-z0-9_.]{0,31}$/.test(String(b.contact_instagram).trim())) return res.status(400).json({ error: 'Instagram username noto‘g‘ri (masalan @mandarin_nasiya).' });
-  text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200); text('info_installment', 1500); text('info_delivery', 1500); text('info_about', 1500); text('promos', 1500);
+  text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200); text('info_installment', 1500); text('info_delivery', 1500); text('info_about', 1500); text('promos', 1500); text('branches', 1000); text('company', 200);
   res.json({ ok: true });
 });
 
@@ -458,6 +529,18 @@ app.post('/api/admin/export', auth, staff, async (req, res) => {
     try { await bot.sendDocument(id, Buffer.from(csv), { caption: '📊 Arizalar (Excel/CSV)' }, { filename: 'arizalar-' + new Date().toISOString().slice(0, 10) + '.csv', contentType: 'text/csv' }); ok = true; } catch (e) { console.error('Export:', e.message); }
   }
   res.json({ ok });
+});
+app.get('/api/admin/audit', auth, admin, (req, res) => res.json(db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 200').all()));
+app.post('/api/admin/applications/:id/contract', auth, staff, async (req, res) => {
+  if (!PDFDocument) return res.status(503).json({ error: 'PDF moduli (pdfkit) o‘rnatilmagan. package.json ni yangilab, qayta deploy qiling.' });
+  if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
+  res.json({ ok: await sendContract(Number(req.params.id), req.authType === 'telegram' ? req.user.id : adminIds()[0]) });
+});
+app.get('/api/admin/applications/:id/contract.pdf', auth, staff, async (req, res) => {
+  if (!PDFDocument) return res.status(503).json({ error: 'pdfkit o‘rnatilmagan.' });
+  const a = db.prepare('SELECT a.*, p.name pname FROM applications a LEFT JOIN products p ON p.id=a.product_id WHERE a.id=?').get(Number(req.params.id));
+  if (!a || a.pay_type !== 'installment') return res.status(404).json({ error: 'Nasiya arizasi topilmadi.' });
+  res.set('Content-Type', 'application/pdf').send(await makeContract(a));
 });
 app.post('/api/admin/upload', auth, admin, (req, res) => {
   const d = String((req.body || {}).data || '');

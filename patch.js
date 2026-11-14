@@ -22,7 +22,7 @@ add('server', 'users.credit_limit ustuni',
 
 add('server', 'Kassir roli (roleOf)',
   R`const roleOf = req => req.authType === 'web' ? 'admin' : adminIds().includes(String(req.user && req.user.id)) ? 'admin' : staffIds().includes(String(req.user && req.user.id)) ? 'manager' : '';`,
-  R`const cashierIds = () => (process.env.CASHIER_IDS || '').split(',').map(x => x.trim()).filter(Boolean);
+  R`const cashierIds = () => [...new Set([...envIds('CASHIER_IDS'), ...dbIds('cashier')])];
 const roleOf = req => req.authType === 'web' ? 'admin' : adminIds().includes(String(req.user && req.user.id)) ? 'admin' : staffIds().includes(String(req.user && req.user.id)) ? 'manager' : cashierIds().includes(String(req.user && req.user.id)) ? 'cashier' : '';`);
 
 add('server', 'Kassir middleware',
@@ -40,7 +40,8 @@ add('server', 'Audit: to‘lov bekor qilish / eksport',
   R`else if (/\/export$/.test(req.path)) t = 'CSV yuklab olindi';`,
   R`else if (/\/export$/.test(req.path)) t = 'CSV yuklab olindi';
     else if (/\/export-payments$/.test(req.path)) t = 'To‘lovlar CSV yuklab olindi';
-    else if (req.method === 'DELETE' && /\/payments\/\d+$/.test(req.path)) t = 'To‘lov #' + req.path.split('/').pop() + ' bekor qilindi';`);
+    else if (req.method === 'DELETE' && /\/payments\/\d+$/.test(req.path)) t = 'To‘lov #' + req.path.split('/').pop() + ' bekor qilindi';
+    else if (/\/staff(\/\d+)?$/.test(req.path)) t = req.method === 'DELETE' ? 'Xodim ' + req.path.split('/').pop() + ' olib tashlandi' : 'Xodim qo‘shildi: ' + String(b.id) + ' (' + String(b.role) + ')';`);
 
 add('server', 'Nasiya limiti tekshiruvi',
   R`const dup = db.prepare("SELECT id FROM applications WHERE telegram_id=? AND product_id=? AND variant=? AND status IN ('new','review')").get(uid, p0.id, variant);`,
@@ -118,19 +119,19 @@ app.get('/api/admin/stats', auth, admin, (req, res) => {`);
 
 add('html', 'To‘lovlar chip',
   R`<button class="chip" onclick="aTab('stt',this);loadStats()">📊 Statistika</button>`,
-  R`<button class="chip" onclick="aTab('stt',this);loadStats()">📊 Statistika</button><button class="chip" onclick="aTab('pays',this);loadPays()">💵 To‘lovlar</button>`);
+  R`<button class="chip" onclick="aTab('stt',this);loadStats()">📊 Statistika</button><button class="chip" onclick="aTab('pays',this);loadPays()">💵 To‘lovlar</button><button class="chip" onclick="aTab('staff',this);loadStaff()">👑 Xodimlar</button>`);
 
 add('html', 'To‘lovlar bo‘limi',
   R`<div id="debt" class="hidden"></div><div id="stt" class="hidden"></div>`,
-  R`<div id="debt" class="hidden"></div><div id="stt" class="hidden"></div><div id="pays" class="hidden"></div>`);
+  R`<div id="debt" class="hidden"></div><div id="stt" class="hidden"></div><div id="pays" class="hidden"></div><div id="staff" class="hidden"></div>`);
 
 add('html', 'aTab ro‘yxati',
   R`['add','stock','apps','settings','custs','audit','debt','stt'].forEach`,
-  R`['add','stock','apps','settings','custs','audit','debt','stt','pays'].forEach`);
+  R`['add','stock','apps','settings','custs','audit','debt','stt','pays','staff'].forEach`);
 
 add('html', 'Rolga qarab bo‘limlarni yashirish',
   R`[1,2,3,5,7].forEach(function(i){if(ch[i])ch[i].classList.toggle('hidden',A.role==='manager')})`,
-  R`var hide=A.role==='cashier'?[1,2,3,4,5,7]:A.role==='manager'?[1,2,3,5,7]:[];for(var hi=0;hi<ch.length;hi++)ch[hi].classList.toggle('hidden',hide.indexOf(hi)>-1)`);
+  R`var hide=A.role==='cashier'?[1,2,3,4,5,7,9]:A.role==='manager'?[1,2,3,5,7,9]:[];for(var hi=0;hi<ch.length;hi++)ch[hi].classList.toggle('hidden',hide.indexOf(hi)>-1)`);
 
 add('html', 'Standart limit maydoni qiymati',
   R`$('remD').value=A.remind_days;`,
@@ -183,6 +184,11 @@ async function delPay(id){if(!confirm('Bu to‘lov yozuvi bekor qilinsinmi? Mijo
 async function exportPays(){try{var d=await api('/api/admin/export-payments',{method:'POST'});say(d.ok?'📊 Fayl Telegramga yuborildi.':'Yuborib bo‘lmadi. Botga /start yuborganingizni tekshiring.')}catch(e){say(e.message)}}
 async function delApp(id){if(!confirm('Ariza #'+id+' butunlay o‘chirilsinmi? Unga tegishli to‘lov yozuvlari ham o‘chadi. Qaytarib bo‘lmaydi.'))return;try{await api('/api/admin/applications/'+id,{method:'DELETE'});await refresh('apps',0);say('🗑 Ariza o‘chirildi.')}catch(e){say(e.message)}}
 async function clearRejected(){if(!confirm('Rad etilgan hamma arizalar o‘chirilsinmi? Qaytarib bo‘lmaydi.'))return;try{var d=await api('/api/admin/applications',{method:'DELETE'});await refresh('apps',0);say('🗑 '+d.count+' ta rad etilgan ariza o‘chirildi.')}catch(e){say(e.message)}}
+var ST={env:{},list:[]},ROLE_UZ={admin:'👑 Admin',manager:'💼 Menejer',cashier:'💵 Kassir'};
+async function loadStaff(){try{ST=await api('/api/admin/staff');var env=[];['admin','manager','cashier'].forEach(function(r){(ST.env[r]||[]).forEach(function(id){env.push('<div class="muted">'+ROLE_UZ[r]+' · '+esc(id)+'</div>')})});
+$('staff').innerHTML='<div class="card"><h2>➕ Xodim qo‘shish</h2><p class="muted">Xodim botga /id deb yozsa, o‘zining Telegram ID raqamini ko‘radi. Shu raqamni pastga kiriting.</p><label>Telegram ID</label><input id="sid" type="number" inputmode="numeric" placeholder="123456789"><label>Ism (ixtiyoriy)</label><input id="snm" maxlength="60"><label>Roli</label><select id="srl"><option value="manager">💼 Menejer — arizalarni ko‘radi va holatini o‘zgartiradi</option><option value="cashier">💵 Kassir — faqat to‘lov qabul qiladi</option><option value="admin">👑 Admin — hamma huquq</option></select><button style="width:100%" onclick="addStaff()">Qo‘shish</button></div>'+(ST.list.length?ST.list.map(function(s){return '<div class="card" style="padding:10px"><b>'+esc(s.name||'—')+'</b> <span class="badge">'+ROLE_UZ[s.role]+'</span><div class="muted">ID '+esc(s.id)+'</div><button class="danger" style="width:100%;margin-top:6px" onclick="delStaff('+s.id+')">🗑 Olib tashlash</button></div>'}).join(''):'<div class="card muted">Qo‘shilgan xodimlar yo‘q.</div>')+(env.length?'<div class="card"><b>Asosiy adminlar (Render sozlamasidan)</b>'+env.join('')+'</div>':'')}catch(e){say(e.message)}}
+async function addStaff(){var id=$('sid').value.trim();if(!/^\d{5,15}$/.test(id)){say('Telegram ID faqat raqamlardan iborat bo‘lsin.');return}try{await api('/api/admin/staff',{method:'POST',body:JSON.stringify({id:id,name:$('snm').value,role:$('srl').value})});say('✅ Xodim qo‘shildi. Unga botdan xabar yuborildi.');await loadStaff()}catch(e){say(e.message)}}
+async function delStaff(id){if(!confirm('Bu xodimni olib tashlaysizmi?'))return;try{await api('/api/admin/staff/'+id,{method:'DELETE'});say('Olib tashlandi.');await loadStaff()}catch(e){say(e.message)}}
 var CU=[];`);
 
 
@@ -238,6 +244,59 @@ add('html', 'Arizalarim: qo‘ng‘iroq kartasi',
   R`<div id="v-mine" class="hidden"><h2>📋 Arizalarim</h2><div id="mineList"></div></div>`,
   R`<div id="v-mine" class="hidden"><h2>📋 Arizalarim</h2><div class="card">📞 Javob kelmasa, qo‘ng‘iroq qiling: <a href="tel:+998916235655">+998 91 623 56 55</a></div><div id="mineList"></div></div>`);
 
+
+/* ---- Admin panel orqali xodim (admin/menejer/kassir) qo'shish ---- */
+add('server', 'Xodimlar jadvali',
+  R`db.exec('CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');`,
+  R`db.exec('CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
+db.exec("CREATE TABLE IF NOT EXISTS staff_users(telegram_id TEXT PRIMARY KEY, role TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', added_at TEXT DEFAULT CURRENT_TIMESTAMP)");`);
+
+add('server', 'adminIds bazadan ham',
+  R`const adminIds = () => (process.env.ADMIN_IDS || '').split(',').map(x => x.trim()).filter(Boolean);`,
+  R`const envIds = k => (process.env[k] || '').split(',').map(x => x.trim()).filter(Boolean);
+const dbIds = role => { try { return db.prepare('SELECT telegram_id id FROM staff_users WHERE role=?').all(role).map(r => String(r.id)); } catch (_) { return []; } };
+const adminIds = () => [...new Set([...envIds('ADMIN_IDS'), ...dbIds('admin')])];`);
+
+add('server', 'staffIds bazadan ham',
+  R`const staffIds = () => [...adminIds(), ...(process.env.MANAGER_IDS || '').split(',').map(x => x.trim()).filter(Boolean)];`,
+  R`const staffIds = () => [...new Set([...adminIds(), ...envIds('MANAGER_IDS'), ...dbIds('manager')])];`);
+
+add('server', 'Xodimlar API',
+  R`app.post('/api/admin/backup', auth, admin, async (req, res) => {`,
+  R`app.get('/api/admin/staff', auth, admin, (req, res) => res.json({
+  env: { admin: envIds('ADMIN_IDS'), manager: envIds('MANAGER_IDS'), cashier: envIds('CASHIER_IDS') },
+  list: db.prepare("SELECT s.telegram_id id, s.role, COALESCE(NULLIF(s.name,''), u.name, '') name FROM staff_users s LEFT JOIN users u ON u.telegram_id=s.telegram_id ORDER BY s.rowid DESC").all()
+}));
+app.post('/api/admin/staff', auth, admin, (req, res) => {
+  const b = req.body || {}, id = String(b.id || '').trim(), role = String(b.role || ''), name = String(b.name || '').trim().slice(0, 60);
+  if (!/^\d{5,15}$/.test(id)) return res.status(400).json({ error: 'Telegram ID faqat raqamlardan iborat bo‘lsin.' });
+  if (!['admin', 'manager', 'cashier'].includes(role)) return res.status(400).json({ error: 'Rol noto‘g‘ri.' });
+  db.prepare('INSERT INTO staff_users(telegram_id,role,name) VALUES(?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET role=excluded.role, name=excluded.name').run(id, role, name);
+  notify(id, '🎉 Sizga ' + ({ admin: 'ADMIN', manager: 'MENEJER', cashier: 'KASSIR' })[role] + ' huquqi berildi. Ilovani oching — “🔐 Admin” tugmasi paydo bo‘ladi.');
+  res.json({ ok: true });
+});
+app.delete('/api/admin/staff/:id', auth, admin, (req, res) => {
+  res.json({ ok: db.prepare('DELETE FROM staff_users WHERE telegram_id=?').run(String(req.params.id)).changes > 0 });
+});
+app.post('/api/admin/backup', auth, admin, async (req, res) => {`);
+
+add('server', 'Zaxiraga xodimlar',
+  R`notify_me: db.prepare('SELECT * FROM notify_me').all() });`,
+  R`notify_me: db.prepare('SELECT * FROM notify_me').all(), staff_users: db.prepare('SELECT * FROM staff_users').all() });`);
+
+add('server', 'Zaxiradan xodimlarni tiklash',
+  R`insertRows('notify_me', data.notify_me || []);`,
+  R`insertRows('notify_me', data.notify_me || []); if (data.staff_users) { db.exec('DELETE FROM staff_users'); insertRows('staff_users', data.staff_users); }`);
+
+add('server', 'Botda /id buyrug‘i',
+  R`bot.on('callback_query', q => {`,
+  R`bot.onText(/^\/id(@\w+)?\s*$/, msg => bot.sendMessage(msg.chat.id, '🆔 Sizning Telegram ID raqamingiz: ' + msg.from.id).catch(() => {}));
+  bot.on('callback_query', q => {`);
+
+add('server', '/id ni texnik yordamga yubormaslik',
+  R`/^\/(start|help)/.test(msg.text || '')`,
+  R`/^\/(start|help|id)\b/.test(msg.text || '')`);
+
 /* ====================== QO'LLASH ====================== */
 const src = {};
 for (const k of Object.keys(FILES)) {
@@ -248,8 +307,9 @@ const errors = [], out = { ...src };
 let applied = 0, skipped = 0;
 for (const e of E) {
   const s = out[e.f], n = s.split(e.find).length - 1;
-  if (n === 1) { out[e.f] = s.replace(e.find, () => e.rep); applied++; }
-  else if (n === 0 && e.rep && s.includes(e.rep)) { skipped++; }
+  if (e.rep !== '' && s.includes(e.rep)) { skipped++; } // allaqachon qo‘llangan
+  else if (n === 1) { out[e.f] = s.replace(e.find, () => e.rep); applied++; }
+  else if (n === 0 && e.rep === '') { skipped++; }
   else errors.push('• [' + FILES[e.f] + '] ' + e.name + (n === 0 ? ' — joy topilmadi' : ' — ' + n + ' ta joy topildi (bittadan ko‘p)'));
 }
 if (errors.length) {

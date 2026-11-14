@@ -134,7 +134,7 @@ add('html', 'Rolga qarab bo‘limlarni yashirish',
 
 add('html', 'Standart limit maydoni qiymati',
   R`$('remD').value=A.remind_days;`,
-  R`$('remD').value=A.remind_days;$('dLim').value=A.default_limit||0;`);
+  R`$('remD').value=A.remind_days;$('dLim').value=A.default_limit||0;$('clrBtn').classList.toggle('hidden',A.role!=='admin');`);
 
 add('html', 'Standart limit kartasi',
   R`<div class="card"><h2>Reklama matni</h2>`,
@@ -151,7 +151,7 @@ add('html', 'Kassirga holat o‘zgartirishni yashirish (boshi)',
 
 add('html', 'Kassirga holat o‘zgartirishni yashirish (oxiri)',
   R`Holatni saqlash</button></div>'}).join('')||'<div class="card">Ariza topilmadi.</div>'`,
-  R`Holatni saqlash</button>')+'</div>'}).join('')||'<div class="card">Ariza topilmadi.</div>'`);
+  R`Holatni saqlash</button>')+(A.role==='admin'?'<button class="danger" style="width:100%;margin-top:8px" onclick="delApp('+x.id+')">🗑 Arizani o‘chirish</button>':'')+'</div>'}).join('')||'<div class="card">Ariza topilmadi.</div>'`);
 
 add('html', 'Ishlamaydigan pasport/karta tugmasini olib tashlash',
   R`+(x.has_secret?'<p class="muted">🪪 Pasport · 💳 ****'+esc(x.card_last4)+' · 📞 '+esc(x.card_phone)+'</p><button class="sec" style="width:100%;margin-bottom:8px" onclick="showSecret('+x.id+')">👁 Pasport va kartani ko‘rish</button>':'')`,
@@ -181,7 +181,62 @@ add('html', 'To‘lovlar bo‘limi funksiyalari',
 async function loadPays(){try{PY=await api('/api/admin/payments');var tot=PY.reduce(function(s,p){return s+p.amount},0);$('pays').innerHTML='<button class="sec" style="width:100%;margin-bottom:8px" onclick="exportPays()">📊 To‘lovlarni Excel (CSV) qilib yuborish</button><div class="card">Oxirgi '+PY.length+' ta to‘lov · jami <b>'+money(tot)+'</b></div>'+(PY.map(function(p){return '<div class="card" style="padding:10px"><b>'+money(p.amount)+'</b> · #'+p.app_id+' '+esc(p.customer||'')+'<div class="muted">'+esc(p.paid_at)+' (UTC) · '+esc(p.taker||'')+(p.note?' · '+esc(p.note):'')+'</div>'+(A.role==='admin'?'<button class="danger" style="width:100%;margin-top:6px" onclick="delPay('+p.id+')">↩️ Bekor qilish</button>':'')+'</div>'}).join('')||'<div class="card">To‘lovlar hali yo‘q.</div>')}catch(e){say(e.message)}}
 async function delPay(id){if(!confirm('Bu to‘lov yozuvi bekor qilinsinmi? Mijozning qarzi shu summaga qaytadi.'))return;try{await api('/api/admin/payments/'+id,{method:'DELETE'});A=await api('/api/admin');fillA();aTab('pays',document.querySelectorAll('#admin .chips .chip')[8]);await loadPays();say('↩️ To‘lov bekor qilindi, mijozga xabar yuborildi.')}catch(e){say(e.message)}}
 async function exportPays(){try{var d=await api('/api/admin/export-payments',{method:'POST'});say(d.ok?'📊 Fayl Telegramga yuborildi.':'Yuborib bo‘lmadi. Botga /start yuborganingizni tekshiring.')}catch(e){say(e.message)}}
+async function delApp(id){if(!confirm('Ariza #'+id+' butunlay o‘chirilsinmi? Unga tegishli to‘lov yozuvlari ham o‘chadi. Qaytarib bo‘lmaydi.'))return;try{await api('/api/admin/applications/'+id,{method:'DELETE'});await refresh('apps',0);say('🗑 Ariza o‘chirildi.')}catch(e){say(e.message)}}
+async function clearRejected(){if(!confirm('Rad etilgan hamma arizalar o‘chirilsinmi? Qaytarib bo‘lmaydi.'))return;try{var d=await api('/api/admin/applications',{method:'DELETE'});await refresh('apps',0);say('🗑 '+d.count+' ta rad etilgan ariza o‘chirildi.')}catch(e){say(e.message)}}
 var CU=[];`);
+
+
+/* ---- Arizalarni o'chirish + qo'ng'iroq raqami ---- */
+add('server', 'Qo‘llab-quvvatlash raqami',
+  R`const money = n => Number(n).toLocaleString('ru-RU') + ' so‘m';`,
+  R`const money = n => Number(n).toLocaleString('ru-RU') + ' so‘m';
+const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+998 91 623 56 55';`);
+
+add('server', 'Audit: ariza o‘chirildi',
+  R`if (m && m[1] === 'applications') t = /\/payments$/.test(req.path) ?`,
+  R`if (m && m[1] === 'applications') t = req.method === 'DELETE' ? 'Ariza #' + id + ' o‘chirildi' : /\/payments$/.test(req.path) ?`);
+
+add('server', 'Arizani o‘chirish API',
+  R`app.post('/api/admin/settings', auth, admin, (req, res) => {`,
+  R`const deleteApp = db.transaction(id => {
+  const a = db.prepare('SELECT * FROM applications WHERE id=?').get(id);
+  if (!a) return false;
+  if (a.stock_taken) adjStock(a, 1);
+  db.prepare('DELETE FROM payments WHERE app_id=?').run(id);
+  db.prepare('DELETE FROM applications WHERE id=?').run(id);
+  return true;
+});
+app.delete('/api/admin/applications/:id', auth, admin, (req, res) => {
+  if (!deleteApp(Number(req.params.id))) return res.status(404).json({ error: 'Ariza topilmadi.' });
+  res.json({ ok: true });
+});
+app.delete('/api/admin/applications', auth, admin, (req, res) => {
+  const ids = db.prepare("SELECT id FROM applications WHERE status='rejected'").all().map(r => r.id);
+  ids.forEach(i => deleteApp(i));
+  res.json({ ok: true, count: ids.length });
+});
+app.post('/api/admin/settings', auth, admin, (req, res) => {`);
+
+add('server', 'Mijozga ariza qabul qilindi xabari',
+  R`staffIds().forEach(id => notify(id, msg));`,
+  R`staffIds().forEach(id => notify(id, msg));
+  notify(uid, '✅ Arizangiz qabul qilindi (#' + r.lastInsertRowid + '). Tez orada siz bilan bog‘lanamiz.\n📞 Agar javob kelmasa, qo‘ng‘iroq qiling: ' + SUPPORT_PHONE);`);
+
+add('server', 'Ariza javobida raqam',
+  R`res.json({ id: r.lastInsertRowid, status: 'new' });`,
+  R`res.json({ id: r.lastInsertRowid, status: 'new', support: SUPPORT_PHONE });`);
+
+add('html', 'Arizalar: rad etilganlarni tozalash tugmasi',
+  R`<div id="apps"><button class="sec" style="width:100%;margin-bottom:8px" onclick="exportCsv()">📊 Excel (CSV) ni Telegramga yuborish</button>`,
+  R`<div id="apps"><button class="sec" style="width:100%;margin-bottom:8px" onclick="exportCsv()">📊 Excel (CSV) ni Telegramga yuborish</button><button id="clrBtn" class="danger hidden" style="width:100%;margin-bottom:8px" onclick="clearRejected()">🗑 Rad etilgan arizalarni hammasini o‘chirish</button>`);
+
+add('html', 'Ariza yuborilgach qo‘ng‘iroq raqami',
+  R`say('✅ Arizangiz qabul qilindi! Raqami: #'+d.id)`,
+  R`say('✅ Arizangiz qabul qilindi! Raqami: #'+d.id+'\n📞 Agar javob kelmasa, qo‘ng‘iroq qiling: '+(d.support||'+998 91 623 56 55'))`);
+
+add('html', 'Arizalarim: qo‘ng‘iroq kartasi',
+  R`<div id="v-mine" class="hidden"><h2>📋 Arizalarim</h2><div id="mineList"></div></div>`,
+  R`<div id="v-mine" class="hidden"><h2>📋 Arizalarim</h2><div class="card">📞 Javob kelmasa, qo‘ng‘iroq qiling: <a href="tel:+998916235655">+998 91 623 56 55</a></div><div id="mineList"></div></div>`);
 
 /* ====================== QO'LLASH ====================== */
 const src = {};

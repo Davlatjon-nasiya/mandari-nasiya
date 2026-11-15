@@ -166,9 +166,30 @@ function loginLimit(req, res, next) {
 
 /* ---------- Telegram bot (xabarnomalar uchun) ---------- */
 let bot = null, botUser = '';
-const notify = (chatId, text) => { if (bot && chatId && /^\d+$/.test(String(chatId))) bot.sendMessage(chatId, text).catch(e => console.error('Notify:', e.message)); };
+const notify = (chatId, text) => { if (bot && chatId && /^-?\d+$/.test(String(chatId))) bot.sendMessage(chatId, text).catch(e => console.error('Notify:', e.message)); };
 const money = n => Number(n).toLocaleString('ru-RU') + ' so‘m';
 const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+998 91 623 56 55';
+const groupId = () => getSetting('group_chat_id') || process.env.GROUP_CHAT_ID || '';
+function appCard(id) { // xodimlar va guruhga boradigan ariza matni
+  const a = db.prepare('SELECT a.*, p.name pname, COALESCE(u.risky,0) risky FROM applications a LEFT JOIN products p ON p.id=a.product_id LEFT JOIN users u ON u.telegram_id=a.telegram_id WHERE a.id=?').get(id);
+  if (!a) return '';
+  const cash = a.pay_type === 'cash';
+  return (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + a.id + (a.risky ? '\n⚠️ ISHONCHSIZ deb belgilangan mijoz!' : '') +
+    '\n👤 ' + a.customer + '\n📞 ' + a.phone + '\n' +
+    (a.delivery === 'delivery' ? '🚚 Yetkazish: ' + a.address + (a.geo ? ' 📍 https://maps.google.com/?q=' + a.geo : '') : '🏪 Filial: ' + (a.branch || 'do‘kon')) +
+    '\n📱 ' + (a.pname || '') + (a.variant ? ' (' + a.variant + ')' : '') + (cash ? ' — ' + money(a.total) : '') + (a.promo ? ' (🎟 ' + a.promo + ')' : '') +
+    (cash ? '' : '\n🗓 ' + a.months + ' oy · avans ' + money(a.down) + (a.trade_value ? ' (shundan eski telefon ' + a.trade_model + ' ≈ ' + money(a.trade_value) + ')' : '') + '\n💳 Oyiga ' + money(a.monthly) + ' (jami ' + money(a.total) + ')') +
+    (a.status !== 'new' ? '\n📌 Holat: ' + STATUS_UZ[a.status] : '');
+}
+const appKb = id => ({ inline_keyboard: [[{ text: '✅ Tasdiqlash', callback_data: 'ap:' + id + ':approved' }, { text: '❌ Rad etish', callback_data: 'ap:' + id + ':rejected' }]] });
+function sendAppCard(id, onlyGroup) { // xodimlarga (DM) va guruhga
+  if (!bot) return false;
+  const text = appCard(id), g = String(groupId());
+  if (!text) return false;
+  const to = onlyGroup ? [g] : [...new Set([...staffIds(), g])];
+  for (const c of to) if (c && /^-?\d+$/.test(c)) bot.sendMessage(c, text, { reply_markup: appKb(id), disable_web_page_preview: true }).catch(e => console.error('Card:', e.message));
+  return Boolean(g);
+}
 
 let PDFDocument = null;
 try { PDFDocument = require('pdfkit'); } catch (_) { console.warn('pdfkit o‘rnatilmagan — shartnoma PDF yuborilmaydi (package.json ni yangilang).'); }
@@ -220,7 +241,7 @@ app.use((req, res, next) => { // admin amallari tarixi + tasdiqlanganda shartnom
     if (res.statusCode >= 400 || !req.user) return;
     const b = req.body || {}, m = req.path.match(/\/(applications|products|customers)\/(\d+)/), id = m && m[2];
     let t = req.method + ' ' + req.path;
-    if (m && m[1] === 'applications') t = req.method === 'DELETE' ? 'Ariza #' + id + ' o‘chirildi' : /\/payments$/.test(req.path) ? 'Ariza #' + id + ': to‘lov qabul qilindi ' + money(b.amount) : /\/contract$/.test(req.path) ? 'Ariza #' + id + ': shartnoma yuborildi' : 'Ariza #' + id + ': ' + (STATUS_UZ[b.status] || b.status) + (b.note ? ' · izoh: ' + String(b.note).slice(0, 60) : '');
+    if (m && m[1] === 'applications') t = req.method === 'DELETE' ? 'Ariza #' + id + ' o‘chirildi' : /\/to-group$/.test(req.path) ? 'Ariza #' + id + ': guruhga yuborildi' : /\/payments$/.test(req.path) ? 'Ariza #' + id + ': to‘lov qabul qilindi ' + money(b.amount) : /\/contract$/.test(req.path) ? 'Ariza #' + id + ': shartnoma yuborildi' : 'Ariza #' + id + ': ' + (STATUS_UZ[b.status] || b.status) + (b.note ? ' · izoh: ' + String(b.note).slice(0, 60) : '');
     else if (m && m[1] === 'products') t = req.method === 'DELETE' ? 'Telefon #' + id + ' o‘chirildi' : 'Telefon #' + id + ' o‘zgartirildi' + (b.name ? ' (' + String(b.name).slice(0, 40) + ')' : '');
     else if (m && m[1] === 'customers') t = 'Mijoz ' + id + ': ' + (b.risky ? 'ishonchsiz' : 'oddiy') + (b.note ? ' · izoh' : '');
     else if (/\/products$/.test(req.path)) t = 'Telefon qo‘shildi: ' + String(b.name || '').slice(0, 40);
@@ -228,6 +249,7 @@ app.use((req, res, next) => { // admin amallari tarixi + tasdiqlanganda shartnom
     else if (/\/broadcast$/.test(req.path)) t = 'Hammaga xabar yuborildi: ' + String(b.text || '').slice(0, 50);
     else if (/\/export$/.test(req.path)) t = 'CSV yuklab olindi';
     else if (/\/export-payments$/.test(req.path)) t = 'To‘lovlar CSV yuklab olindi';
+    else if (/\/group-test$/.test(req.path)) t = 'Guruhga test xabar yuborildi';
     else if (req.method === 'DELETE' && /\/payments\/\d+$/.test(req.path)) t = 'To‘lov #' + req.path.split('/').pop() + ' bekor qilindi';
     else if (/\/staff(\/\d+)?$/.test(req.path)) t = req.method === 'DELETE' ? 'Xodim ' + req.path.split('/').pop() + ' olib tashlandi' : 'Xodim qo‘shildi: ' + String(b.id) + ' (' + String(b.role) + ')';
     else if (req.method === 'DELETE' && /\/applications$/.test(req.path)) t = 'Rad etilgan arizalar o‘chirildi';
@@ -397,10 +419,7 @@ app.post('/api/applications', auth, (req, res) => {
   if (dup) return res.status(409).json({ error: 'Bu telefon uchun arizangiz allaqachon bor (#' + dup.id + ').' });
   const r = db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,consent_at,variant,trade_model,trade_value,promo,delivery,branch,address,geo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(uid, customer, phone, p0.id, months, down, total, monthly, cash ? 'cash' : 'installment', '', variant, tradeModel, tradeValue, pr ? pr.code : '', delivery, branch, address, geo);
-  const risky = db.prepare('SELECT risky FROM users WHERE telegram_id=?').get(uid);
-  const msg = (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + r.lastInsertRowid + (risky && risky.risky ? '\n⚠️ ISHONCHSIZ deb belgilangan mijoz!' : '') + '\n👤 ' + customer + '\n📞 ' + phone + '\n' + (delivery === 'delivery' ? '🚚 Yetkazish: ' + address + (geo ? ' 📍 https://maps.google.com/?q=' + geo : '') : '🏪 Filial: ' + (branch || 'do‘kon')) + '\n📱 ' + p0.name + (variant ? ' (' + variant + ')' : '') + ' — ' + money(price) + (pr ? ' (🎟 ' + pr.code + ' −' + pr.percent + '%)' : '') +
-    (cash ? '' : '\n🗓 ' + months + ' oy · avans ' + money(down) + (tradeValue ? ' (shundan eski telefon ' + tradeModel + ' ≈ ' + money(tradeValue) + ')' : '') + '\n💳 Oyiga ' + money(monthly) + ' (jami ' + money(total) + ')');
-  staffIds().forEach(id => notify(id, msg));
+  sendAppCard(r.lastInsertRowid);
   notify(uid, '✅ Arizangiz qabul qilindi (#' + r.lastInsertRowid + '). Tez orada siz bilan bog‘lanamiz.\n📞 Agar javob kelmasa, qo‘ng‘iroq qiling: ' + SUPPORT_PHONE);
   res.json({ id: r.lastInsertRowid, status: 'new', support: SUPPORT_PHONE });
 });
@@ -421,7 +440,7 @@ app.get('/api/admin', auth, cashier, (req, res) => {
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
-    remind_days: Number(getSetting('remind_days', '3')), default_limit: Number(getSetting('default_limit', '0')), promos: getSetting('promos'), role: roleOf(req), branches_raw: getSetting('branches'), company: getSetting('company'), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
+    remind_days: Number(getSetting('remind_days', '3')), default_limit: Number(getSetting('default_limit', '0')), group_chat_id: groupId(), promos: getSetting('promos'), role: roleOf(req), branches_raw: getSetting('branches'), company: getSetting('company'), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
   });
 });
 
@@ -543,6 +562,11 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
     const markup = Number(b.markup);
     if (!Number.isFinite(markup) || markup < 0 || markup > 300) return res.status(400).json({ error: 'Ustama 0–300% oralig‘ida bo‘lsin.' });
     setSetting('markup', markup);
+  }
+  if (b.group_chat_id !== undefined) {
+    const g = String(b.group_chat_id).trim();
+    if (g && !/^-?\d{5,20}$/.test(g)) return res.status(400).json({ error: 'Guruh ID noto‘g‘ri. Masalan: -1001234567890' });
+    setSetting('group_chat_id', g);
   }
   if (b.default_limit !== undefined) {
     const v = Number(b.default_limit);
@@ -693,6 +717,21 @@ app.get('/img/:id', (req, res) => {
   res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' }).send(Buffer.from(r.data, 'base64'));
 });
 
+/* ---------- Guruhga yuborish ---------- */
+app.post('/api/admin/applications/:id/to-group', auth, staff, (req, res) => {
+  if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
+  if (!groupId()) return res.status(400).json({ error: 'Guruh ID kiritilmagan (Sozlamalar → Guruh).' });
+  if (!sendAppCard(Number(req.params.id), true)) return res.status(404).json({ error: 'Ariza topilmadi.' });
+  res.json({ ok: true });
+});
+app.post('/api/admin/group-test', auth, admin, async (req, res) => {
+  if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
+  const g = String(groupId());
+  if (!/^-?\d{5,20}$/.test(g)) return res.status(400).json({ error: 'Avval guruh ID ni kiriting va saqlang.' });
+  try { await bot.sendMessage(g, '✅ Mandarin Nasiya: guruh ulandi. Endi yangi arizalar shu yerga tushadi.'); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: 'Guruhga yuborib bo‘lmadi. Botni guruhga qo‘shib, admin qiling va ID ni tekshiring. (' + e.message + ')' }); }
+});
+
 /* ---------- Xodimlar (admin paneldan qo‘shish) ---------- */
 app.get('/api/admin/staff', auth, admin, (req, res) => res.json({
   env: { admin: envIds('ADMIN_IDS'), manager: envIds('MANAGER_IDS'), cashier: envIds('CASHIER_IDS') },
@@ -745,8 +784,27 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
       if (adminIds().includes(String(msg.from.id))) bot.sendMessage(msg.chat.id, '👨‍💼 Admin: mijoz yozsa xabar shu yerga keladi. Javob berish uchun xabarga REPLY qiling — javob mijozga yetadi.');
     } catch (e) { console.error('/start:', e.message); }
   });
-  bot.onText(/^\/id(@\w+)?\s*$/, msg => bot.sendMessage(msg.chat.id, '🆔 Sizning Telegram ID raqamingiz: ' + msg.from.id).catch(() => {}));
+  bot.onText(/^\/id(@\w+)?\s*$/, msg => bot.sendMessage(msg.chat.id, msg.chat.type === 'private' ? '🆔 Sizning Telegram ID raqamingiz: ' + msg.from.id : '🆔 Bu guruhning ID raqami: ' + msg.chat.id + '\nUni admin paneldagi Sozlamalar → Guruh bo‘limiga kiriting.').catch(() => {}));
   bot.on('callback_query', q => {
+    const ap = /^ap:(\d+):(approved|rejected)$/.exec(q.data || '');
+    if (ap) { // guruh/DM dagi tugmalar orqali ariza holatini o‘zgartirish
+      const alert = text => bot.answerCallbackQuery(q.id, { text, show_alert: true }).catch(() => {});
+      if (!staffIds().includes(String(q.from.id))) return alert('Bu tugma faqat xodimlar uchun.');
+      const id = Number(ap[1]), st = ap[2];
+      let a;
+      try { a = changeStatus(id, st); } catch (e) { return alert(e.message); }
+      if (!a) return alert('Ariza topilmadi (o‘chirilgan).');
+      const who = [q.from.first_name, q.from.username ? '@' + q.from.username : ''].filter(Boolean).join(' ');
+      try { db.prepare('INSERT INTO audit(actor,role,text) VALUES(?,?,?)').run(who + ' (' + q.from.id + ')', 'bot', 'Ariza #' + id + ': ' + STATUS_UZ[st] + ' (tugma orqali)'); } catch (_) {}
+      if (a.status !== st) {
+        const p = db.prepare('SELECT name FROM products WHERE id=?').get(a.product_id);
+        notify(a.telegram_id, '📋 Arizangiz #' + id + ' (' + (p ? p.name : '') + ')\nHolat: ' + STATUS_UZ[st]);
+        if (st === 'approved') sendContract(id, null, true).catch(e => console.error('Contract:', e.message));
+      }
+      bot.answerCallbackQuery(q.id, { text: 'Holat: ' + STATUS_UZ[st] }).catch(() => {});
+      if (q.message) bot.editMessageText(appCard(id) + '\n✍️ ' + who, { chat_id: q.message.chat.id, message_id: q.message.message_id, disable_web_page_preview: true }).catch(() => {});
+      return;
+    }
     if (q.data === 'support') { bot.answerCallbackQuery(q.id).catch(() => {}); bot.sendMessage(q.message.chat.id, '🆘 Savolingizni shu yerga yozing (matn yoki rasm) — adminga yuboraman.').catch(() => {}); }
   });
   const hits = new Map();

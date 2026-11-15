@@ -69,7 +69,7 @@ if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('markup')) setSetting(
 const TERMS = [3, 6, 12, 18, 24];
 const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}')); if (o[m] !== undefined && Number.isFinite(Number(o[m]))) return Number(o[m]); } catch (_) {} return Number(getSetting('markup', '50')); };
 const colsOf = t => db.prepare('PRAGMA table_info(' + t + ')').all().map(c => c.name);
-for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'credit_limit', 'INTEGER NOT NULL DEFAULT 0'], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'delivery', "TEXT NOT NULL DEFAULT 'pickup'"], ['applications', 'branch', "TEXT NOT NULL DEFAULT ''"], ['applications', 'address', "TEXT NOT NULL DEFAULT ''"], ['applications', 'geo', "TEXT NOT NULL DEFAULT ''"], ['applications', 'contract_sent', "TEXT NOT NULL DEFAULT ''"], ['applications', 'last_overdue_remind', "TEXT NOT NULL DEFAULT ''"]])
+for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['products', 'price_usd', 'REAL NOT NULL DEFAULT 0'], ['products', 'old_price_usd', 'REAL NOT NULL DEFAULT 0'], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'credit_limit', 'INTEGER NOT NULL DEFAULT 0'], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'delivery', "TEXT NOT NULL DEFAULT 'pickup'"], ['applications', 'branch', "TEXT NOT NULL DEFAULT ''"], ['applications', 'address', "TEXT NOT NULL DEFAULT ''"], ['applications', 'geo', "TEXT NOT NULL DEFAULT ''"], ['applications', 'contract_sent', "TEXT NOT NULL DEFAULT ''"], ['applications', 'last_overdue_remind', "TEXT NOT NULL DEFAULT ''"]])
   if (!colsOf(t).includes(c)) db.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + d);
 const getBranches = () => getSetting('branches').split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0]).map(x => ({ name: x[0], address: x[1] || '', phone: x[2] || '' }));
 const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
@@ -80,7 +80,7 @@ const shape = p => {
   if (!im.length && p.image) im = [p.image];
   let out = { ...p, images: im, variants: vs };
   const today = new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10);
-  if (p.old_price > 0 && p.sale_until && p.sale_until < today) out = { ...out, price: p.old_price, old_price: 0, sale_until: '' }; // aksiya tugagan
+  if (p.old_price > 0 && p.sale_until && p.sale_until < today) out = { ...out, price: p.old_price, old_price: 0, sale_until: '', ...(p.old_price_usd > 0 ? { price_usd: p.old_price_usd, old_price_usd: 0 } : {}) }; // aksiya tugagan
   return out;
 };
 const dataKey = crypto.createHash('sha256').update(process.env.DATA_KEY || ('mandarin|' + (process.env.BOT_TOKEN || 'local'))).digest();
@@ -353,7 +353,7 @@ app.post('/api/admin/login', loginLimit, (req, res) => {
 
 app.get('/api/catalog', (_, res) => {
   res.json({
-    products: db.prepare('SELECT id,name,price,stock,image,images,description,category,variants,old_price,sale_until FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
+    products: db.prepare('SELECT id,name,price,stock,image,images,description,category,variants,old_price,sale_until,price_usd,old_price_usd FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
     bot: botUser,
     branches: getBranches(),
@@ -440,7 +440,7 @@ app.get('/api/admin', auth, cashier, (req, res) => {
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },
-    remind_days: Number(getSetting('remind_days', '3')), default_limit: Number(getSetting('default_limit', '0')), group_chat_id: groupId(), promos: getSetting('promos'), role: roleOf(req), branches_raw: getSetting('branches'), company: getSetting('company'), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
+    remind_days: Number(getSetting('remind_days', '3')), default_limit: Number(getSetting('default_limit', '0')), group_chat_id: groupId(), usd_rate: usdRate(), promos: getSetting('promos'), role: roleOf(req), branches_raw: getSetting('branches'), company: getSetting('company'), stats: { total: stats.total || 0, new: stats.new_ || 0, review: stats.review || 0, approved: stats.approved || 0, rejected: stats.rejected || 0 }
   });
 });
 
@@ -449,43 +449,68 @@ function parseImages(v) {
   const arr = (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => String(x).trim()).filter(Boolean);
   return arr.length <= 6 && arr.every(validImage) ? arr : null;
 }
-function parseVariants(v) {
+/* ---------- Dollar kursi: narx $ da kiritiladi, so‘mga kurs bo‘yicha o‘giriladi ---------- */
+const usdRate = () => Number(getSetting('usd_rate', '0')) || 0;
+const toUzs = usd => Math.max(1000, Math.round(usd * usdRate() / 1000) * 1000); // 1000 so‘mgacha yaxlitlanadi
+const usdOk = v => Number.isFinite(v) && v > 0 && v <= 1e6 && Math.abs(v * 100 - Math.round(v * 100)) < 1e-6; // 2 xonagacha kasr
+function repriceUsd() { // kurs o‘zgarganda dollardagi hamma telefonlar narxini yangilaydi
+  const rows = db.prepare('SELECT * FROM products WHERE price_usd > 0').all();
+  const upd = db.prepare('UPDATE products SET price=?, old_price=?, variants=? WHERE id=?');
+  db.transaction(() => {
+    for (const p of rows) {
+      let vs = []; try { vs = JSON.parse(p.variants || '[]'); } catch (_) {}
+      vs = vs.map(v => v.usd > 0 ? { ...v, price: toUzs(v.usd) } : v);
+      const price = vs.length ? Math.min(...vs.map(v => v.price)) : toUzs(p.price_usd);
+      upd.run(price, p.old_price_usd > 0 ? toUzs(p.old_price_usd) : p.old_price, JSON.stringify(vs), p.id);
+    }
+  })();
+  return rows.length;
+}
+function parseVariants(v, usd) {
   const lines = (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => String(x).trim()).filter(Boolean), out = [];
   for (const line of lines) {
-    const [n, p, st] = line.split('|').map(x => x.trim()), price = Number(p), stock = Number(st);
-    if (!n || n.length > 50 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0) return null;
-    out.push({ name: n, price, stock });
+    const [n, p, st] = line.split('|').map(x => x.trim()), num = Number(p), stock = Number(st);
+    if (!n || n.length > 50 || !Number.isSafeInteger(stock) || stock < 0) return null;
+    if (usd) { if (!usdOk(num)) return null; out.push({ name: n, price: toUzs(num), stock, usd: num }); }
+    else { if (!Number.isSafeInteger(num) || num < 1) return null; out.push({ name: n, price: num, stock }); }
   }
   return out.length <= 12 ? out : null;
 }
 const saleOk = (old, until, price) => (!old && !until) || (Number.isSafeInteger(old) && old > price && /^\d{4}-\d{2}-\d{2}$/.test(until));
 const PBAD = 'Qiymatlarni tekshiring: nomi, narx, soni, rasm havolalari, variantlar («nom | narx | soni») yoki aksiya (eski narx va tugash sanasi).';
+const NEED_RATE = 'Avval Sozlamalarda dollar kursini kiriting.';
 app.post('/api/admin/products', auth, admin, (req, res) => {
-  const b = req.body || {}, name = String(b.name || '').trim();
-  let price = Number(b.price), stock = Number(b.stock);
+  const b = req.body || {}, name = String(b.name || '').trim(), usd = b.currency === 'USD';
+  if (usd && !usdRate()) return res.status(400).json({ error: NEED_RATE });
+  let pin = Number(b.price), stock = Number(b.stock);
   const description = String(b.description || '').trim().slice(0, 1000), category = String(b.category || '').trim().slice(0, 40);
-  const imgs = parseImages(b.images !== undefined ? b.images : b.image), vs = parseVariants(b.variants);
-  if (vs && vs.length) { price = Math.min(...vs.map(v => v.price)); stock = vs.reduce((t, v) => t + v.stock, 0); }
-  const old = Number(b.old_price || 0), until = String(b.sale_until || '');
-  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
-  const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category,variants,old_price,sale_until) VALUES(?,?,?,?,?,?,?,?,?,?)').run(name, price, stock, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until);
+  const imgs = parseImages(b.images !== undefined ? b.images : b.image), vs = parseVariants(b.variants, usd);
+  if (vs && vs.length) { pin = Math.min(...vs.map(v => usd ? v.usd : v.price)); stock = vs.reduce((t, v) => t + v.stock, 0); }
+  const oin = Number(b.old_price || 0), until = String(b.sale_until || '');
+  const priceOk = usd ? usdOk(pin) : (Number.isSafeInteger(pin) && pin >= 1), oldOk = !oin || (usd ? usdOk(oin) : Number.isSafeInteger(oin));
+  const price = usd ? toUzs(pin) : pin, old = oin ? (usd ? toUzs(oin) : oin) : 0;
+  if (!name || name.length > 100 || !priceOk || !oldOk || !Number.isSafeInteger(stock) || stock < 0 || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
+  const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category,variants,old_price,sale_until,price_usd,old_price_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(name, price, stock, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until, usd ? pin : 0, usd ? oin : 0);
   res.json({ id: r.lastInsertRowid });
 });
 app.patch('/api/admin/products/:id', auth, admin, (req, res) => {
   const id = Number(req.params.id), p = db.prepare('SELECT * FROM products WHERE id=?').get(id);
   if (!p) return res.status(404).json({ error: 'Mahsulot topilmadi.' });
-  const b = req.body || {}, cur = shape(p);
+  const b = req.body || {}, cur = shape(p), usd = b.currency === undefined ? p.price_usd > 0 : b.currency === 'USD';
+  if (usd && !usdRate()) return res.status(400).json({ error: NEED_RATE });
   const name = String(b.name === undefined ? p.name : b.name).trim();
-  let price = Number(b.price === undefined ? p.price : b.price), stock = Number(b.stock === undefined ? p.stock : b.stock);
+  let pin = Number(b.price === undefined ? (usd ? p.price_usd : p.price) : b.price), stock = Number(b.stock === undefined ? p.stock : b.stock);
   const active = Number(b.active === undefined ? p.active : b.active);
   const description = String(b.description === undefined ? p.description : b.description).trim().slice(0, 1000);
   const category = String(b.category === undefined ? p.category : b.category).trim().slice(0, 40);
   const imgs = b.images === undefined ? cur.images : parseImages(b.images);
-  const vs = b.variants === undefined ? cur.variants : parseVariants(b.variants);
-  if (vs && vs.length) { price = Math.min(...vs.map(v => v.price)); stock = vs.reduce((t, v) => t + v.stock, 0); }
-  const old = Number(b.old_price === undefined ? p.old_price : b.old_price || 0), until = String(b.sale_until === undefined ? p.sale_until : b.sale_until);
-  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(stock) || stock < 0 || ![0, 1].includes(active) || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
-  db.prepare('UPDATE products SET name=?,price=?,stock=?,active=?,image=?,images=?,description=?,category=?,variants=?,old_price=?,sale_until=? WHERE id=?').run(name, price, stock, active, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until, id);
+  const vs = b.variants === undefined ? cur.variants : parseVariants(b.variants, usd);
+  if (vs && vs.length) { pin = Math.min(...vs.map(v => usd ? v.usd : v.price)); stock = vs.reduce((t, v) => t + v.stock, 0); }
+  const oin = Number(b.old_price === undefined ? (usd ? p.old_price_usd : p.old_price) : b.old_price || 0), until = String(b.sale_until === undefined ? p.sale_until : b.sale_until);
+  const priceOk = usd ? usdOk(pin) : (Number.isSafeInteger(pin) && pin >= 1), oldOk = !oin || (usd ? usdOk(oin) : Number.isSafeInteger(oin));
+  const price = usd ? toUzs(pin) : pin, old = oin ? (usd ? toUzs(oin) : oin) : 0;
+  if (!name || name.length > 100 || !priceOk || !oldOk || !Number.isSafeInteger(stock) || stock < 0 || ![0, 1].includes(active) || !imgs || !vs || !saleOk(old, until, price)) return res.status(400).json({ error: PBAD });
+  db.prepare('UPDATE products SET name=?,price=?,stock=?,active=?,image=?,images=?,description=?,category=?,variants=?,old_price=?,sale_until=?,price_usd=?,old_price_usd=? WHERE id=?').run(name, price, stock, active, imgs[0] || '', JSON.stringify(imgs), description, category, JSON.stringify(vs), old, until, usd ? pin : 0, usd ? oin : 0, id);
   productHooks(p, { id, name, price, stock });
   res.json({ ok: true });
 });
@@ -558,10 +583,17 @@ app.delete('/api/admin/applications', auth, admin, (req, res) => {
 
 app.post('/api/admin/settings', auth, admin, (req, res) => {
   const b = req.body || {};
+  let repriced = 0;
   if (b.markup !== undefined) {
     const markup = Number(b.markup);
     if (!Number.isFinite(markup) || markup < 0 || markup > 300) return res.status(400).json({ error: 'Ustama 0–300% oralig‘ida bo‘lsin.' });
     setSetting('markup', markup);
+  }
+  if (b.usd_rate !== undefined) {
+    const v = Number(b.usd_rate);
+    if (!Number.isFinite(v) || v < 1000 || v > 100000) return res.status(400).json({ error: 'Dollar kursi noto‘g‘ri. 1 dollar necha so‘m? Masalan: 12800' });
+    setSetting('usd_rate', v);
+    repriced = repriceUsd();
   }
   if (b.group_chat_id !== undefined) {
     const g = String(b.group_chat_id).trim();
@@ -594,7 +626,7 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
     return res.status(400).json({ error: 'Telegram username noto‘g‘ri (masalan @mandarin_nasiya).' });
   if (b.contact_instagram !== undefined && !/^@?[A-Za-z0-9_.]{0,31}$/.test(String(b.contact_instagram).trim())) return res.status(400).json({ error: 'Instagram username noto‘g‘ri (masalan @mandarin_nasiya).' });
   text('contact_instagram', 32); text('contact_phone', 30); text('contact_telegram', 33); text('contact_address', 200); text('contact_hours', 100); text('promo', 200); text('info_installment', 1500); text('info_delivery', 1500); text('info_about', 1500); text('promos', 1500); text('branches', 1000); text('company', 200);
-  res.json({ ok: true });
+  res.json({ ok: true, repriced });
 });
 
 app.get('/api/favorites', auth, (req, res) => res.json(db.prepare('SELECT product_id FROM favorites WHERE telegram_id=?').all(String(req.user.id)).map(r => r.product_id)));

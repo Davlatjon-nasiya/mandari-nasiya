@@ -49,6 +49,7 @@ if (!prodCols.includes('category')) db.exec("ALTER TABLE products ADD COLUMN cat
 if (!prodCols.includes('images')) db.exec("ALTER TABLE products ADD COLUMN images TEXT NOT NULL DEFAULT '[]'");
 if (!appCols.includes('total')) db.exec('ALTER TABLE applications ADD COLUMN total INTEGER NOT NULL DEFAULT 0');
 if (!appCols.includes('monthly')) db.exec('ALTER TABLE applications ADD COLUMN monthly INTEGER NOT NULL DEFAULT 0');
+if (!appCols.includes('items_json')) db.exec("ALTER TABLE applications ADD COLUMN items_json TEXT NOT NULL DEFAULT ''");
 db.exec('CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
 db.exec("CREATE TABLE IF NOT EXISTS staff_users(telegram_id TEXT PRIMARY KEY, role TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', added_at TEXT DEFAULT CURRENT_TIMESTAMP)");
 db.exec(`
@@ -177,11 +178,13 @@ function appCard(id) { // xodimlar va guruhga boradigan ariza matni
   const a = db.prepare('SELECT a.*, p.name pname, COALESCE(u.risky,0) risky FROM applications a LEFT JOIN products p ON p.id=a.product_id LEFT JOIN users u ON u.telegram_id=a.telegram_id WHERE a.id=?').get(id);
   if (!a) return '';
   const cash = a.pay_type === 'cash';
+  let items = []; try { items = a.items_json ? JSON.parse(a.items_json) : []; } catch (_) {}
+  const itemText = items.length ? items.map((x,i) => (i+1)+'. '+x.name+(x.variant?' ('+x.variant+')':'')+' × '+x.qty+' — '+money(x.unit_price*x.qty)).join('\n') : (a.pname || '') + (a.variant ? ' (' + a.variant + ')' : '');
   return (cash ? '💵 NAXT buyurtma #' : '💳 NASIYA ariza #') + a.id + (a.risky ? '\n⚠️ ISHONCHSIZ deb belgilangan mijoz!' : '') +
     '\n👤 ' + a.customer + '\n📞 ' + a.phone + '\n' +
     (a.delivery === 'delivery' ? '🚚 Yetkazish: ' + a.address + (a.geo ? ' 📍 https://maps.google.com/?q=' + a.geo : '') : '🏪 Filial: ' + (a.branch || 'do‘kon')) +
-    '\n📱 ' + (a.pname || '') + (a.variant ? ' (' + a.variant + ')' : '') + (cash ? ' — ' + money(a.total) : '') + (a.promo ? ' (🎟 ' + a.promo + ')' : '') +
-    (cash ? '' : '\n🗓 ' + a.months + ' oy · avans ' + money(a.down) + (a.trade_value ? ' (shundan eski telefon ' + a.trade_model + ' ≈ ' + money(a.trade_value) + ')' : '') + '\n💳 Oyiga ' + money(a.monthly) + ' (jami ' + money(a.total) + ')') +
+    '\n📦 Mahsulotlar:\n' + itemText + '\n🧾 Umumiy: ' + money(a.total) + (a.promo ? ' (🎟 ' + a.promo + ')' : '') +
+    (cash ? '' : '\n🗓 ' + a.months + ' oy · avans ' + money(a.down) + '\n💳 Oyiga ' + money(a.monthly) + ' (nasiya jami ' + money(a.total) + ')') +
     (a.status !== 'new' ? '\n📌 Holat: ' + STATUS_UZ[a.status] : '');
 }
 const appKb = id => ({ inline_keyboard: [[{ text: '✅ Tasdiqlash', callback_data: 'ap:' + id + ':approved' }, { text: '❌ Rad etish', callback_data: 'ap:' + id + ':rejected' }]] });
@@ -211,7 +214,9 @@ function makeContract(a) {
     doc.text('Sotuvchi: ' + co + (getSetting('contact_phone') ? ', tel: ' + asc(getSetting('contact_phone')) : '') + (getSetting('contact_address') ? ', manzil: ' + asc(getSetting('contact_address')) : ''));
     doc.text('Xaridor: ' + asc(a.customer) + ', tel: ' + asc(a.phone) + (a.delivery === 'delivery' ? ', yetkazish manzili: ' + asc(a.address) : ', olib ketish filiali: ' + asc(a.branch || 'dokon'))).moveDown();
     doc.font('Helvetica-Bold').text('2. Shartnoma predmeti va narx').font('Helvetica');
-    doc.text('Tovar: ' + asc(a.pname) + (a.variant ? ' (' + asc(a.variant) + ')' : '') + '.');
+    let contractItems=[];try{contractItems=a.items_json?JSON.parse(a.items_json):[];}catch(_){} 
+    if(contractItems.length) contractItems.forEach((x,i)=>doc.text((i+1)+'. '+asc(x.name)+(x.variant?' ('+asc(x.variant)+')':'')+' × '+x.qty+' — '+M(x.unit_price*x.qty)));
+    else doc.text('Tovar: ' + asc(a.pname) + (a.variant ? ' (' + asc(a.variant) + ')' : '') + '.');
     doc.text('Boshlangich tolov (avans): ' + M(a.down) + (a.trade_model ? " (shundan eski telefon '" + asc(a.trade_model) + "' ~ " + M(a.trade_value) + ')' : '') + '.');
     doc.text('Muddat: ' + a.months + ' oy. Oylik tolov: ' + M(a.monthly) + '. Nasiya bo\'yicha jami: ' + M(a.total) + '. Umumiy qiymat: ' + M(price) + '.').moveDown();
     doc.font('Helvetica-Bold').text('3. Tolov jadvali').font('Helvetica');
@@ -517,6 +522,37 @@ const promoFor = code => {
   return null;
 };
 app.get('/api/promo', (req, res) => { const r = promoFor(req.query.code); return r ? res.json(r) : res.status(404).json({ error: 'Promokod topilmadi yoki muddati tugagan.' }); });
+app.post('/api/applications/cart', auth, (req, res) => {
+  if (req.authType !== 'telegram') return res.status(401).json({error:'Ariza yuborish uchun Telegram ichidan oching.'});
+  const uid=String(req.user.id), b=req.body||{}, cash=b.pay_type==='cash';
+  const customer=String(b.customer||'').trim(), phone=String(b.phone||'').trim();
+  if(customer.length<2||customer.length>100)return res.status(400).json({error:'Ism-familiyani to‘g‘ri kiriting.'});
+  if(!PHONE_RE.test(phone))return res.status(400).json({error:'Telefon raqamini to‘g‘ri kiriting.'});
+  const rows=db.prepare('SELECT c.product_id,c.qty,p.* FROM cart_items c JOIN products p ON p.id=c.product_id WHERE c.telegram_id=? AND p.active=1 ORDER BY c.created_at').all(uid);
+  if(!rows.length)return res.status(400).json({error:'Savatcha bo‘sh.'});
+  const items=[];
+  for(const p of rows){if(p.stock<p.qty)return res.status(400).json({error:p.name+' uchun omborda yetarli mahsulot yo‘q.'});items.push({product_id:p.product_id,name:p.name,variant:'',qty:p.qty,unit_price:p.price});}
+  const subtotal=items.reduce((n,x)=>n+x.qty*x.unit_price,0);
+  let months=0,down=0,total=subtotal,monthly=0;
+  if(!cash){months=Number(b.months);down=Number(b.down||0);if(!TERMS.includes(months))return res.status(400).json({error:'Nasiya muddatini tanlang.'});if(!Number.isSafeInteger(down)||down<0||down>=subtotal)return res.status(400).json({error:'Avans jami narxdan kam bo‘lishi kerak.'});total=Math.ceil((subtotal-down)*(1+markupFor(months)/100));monthly=Math.ceil(total/months);}
+  const pending=db.prepare("SELECT COUNT(*) c FROM applications WHERE telegram_id=? AND status IN ('new','review')").get(uid).c;
+  if(pending>=5)return res.status(429).json({error:'Sizda 5 ta ko‘rib chiqilayotgan ariza bor.'});
+  if(!cash){const lim=limitFor(uid),used=lim>0?usedCredit(uid):0;if(lim>0&&used+total>lim)return res.status(400).json({error:'Nasiya limiti yetarli emas. Avansni oshiring yoki qarzni to‘lang.'});}
+  const delivery=b.delivery==='delivery'?'delivery':'pickup', address=String(b.address||'').trim().slice(0,200), brs=getBranches();
+  let branch='';
+  if(delivery==='delivery'&&address.length<5)return res.status(400).json({error:'Yetkazish manzilini kiriting.'});
+  if(delivery==='pickup'&&brs.length){const f=brs.find(x=>x.name===String(b.branch||''));if(!f)return res.status(400).json({error:'Filialni tanlang.'});branch=f.name;}
+  const first=items[0];
+  const tx=db.transaction(()=>{
+    const r=db.prepare('INSERT INTO applications(telegram_id,customer,phone,product_id,months,down,total,monthly,pay_type,consent_at,variant,trade_model,trade_value,promo,delivery,branch,address,geo,items_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(uid,customer,phone,first.product_id,months,down,total,monthly,cash?'cash':'installment','',first.variant,'',0,'',delivery,branch,delivery==='delivery'?address:'','',JSON.stringify(items));
+    db.prepare('DELETE FROM cart_items WHERE telegram_id=?').run(uid);
+    return r.lastInsertRowid;
+  });
+  const id=tx();sendAppCard(id);notify(uid,'✅ Savatingizdagi '+items.length+' xil mahsulot uchun bitta ariza qabul qilindi (#'+id+').');
+  res.json({id,status:'new',support:SUPPORT_PHONE,items:items.length,total});
+});
+
 app.post('/api/applications', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(401).json({ error: 'Ariza yuborish uchun Telegram ichidan oching.' });
   const b = req.body || {}, cash = b.pay_type === 'cash', bad = m => res.status(400).json({ error: m });
@@ -659,6 +695,16 @@ app.delete('/api/admin/products/:id', auth, admin, (req, res) => {
 
 const TAKEN = ['approved', 'preparing', 'shipping', 'delivered'];
 function adjStock(a, delta) {
+  let multi=[]; try { multi=a.items_json?JSON.parse(a.items_json):[]; } catch (_) {}
+  if(multi.length){
+    for(const item of multi){
+      const p=db.prepare('SELECT * FROM products WHERE id=?').get(item.product_id);
+      if(!p)continue;
+      if(p.stock+delta*item.qty<0)return false;
+    }
+    for(const item of multi)db.prepare('UPDATE products SET stock=stock+? WHERE id=?').run(delta*item.qty,item.product_id);
+    return true;
+  }
   const p = db.prepare('SELECT * FROM products WHERE id=?').get(a.product_id);
   if (!p) return true;
   if (a.variant) {
@@ -689,8 +735,8 @@ app.patch('/api/admin/applications/:id', auth, staff, (req, res) => {
   if (!a) return res.status(404).json({ error: 'Ariza topilmadi.' });
   if (b.note !== undefined) db.prepare('UPDATE applications SET note=? WHERE id=?').run(note, id);
   if (a.status !== status) {
-    const p = db.prepare('SELECT name FROM products WHERE id=?').get(a.product_id);
-    notify(a.telegram_id, '📋 Arizangiz #' + id + ' (' + (p ? p.name : '') + ')\nHolat: ' + STATUS_UZ[status] + (note ? '\n💬 ' + note : ''));
+    let names='';try{names=(a.items_json?JSON.parse(a.items_json):[]).map(x=>x.name).join(', ')}catch(_){} if(!names){const p=db.prepare('SELECT name FROM products WHERE id=?').get(a.product_id);names=p?p.name:''}
+    notify(a.telegram_id, '📋 Arizangiz #' + id + ' (' + names + ')\nHolat: ' + STATUS_UZ[status] + (note ? '\n💬 ' + note : ''));
   }
   res.json({ ok: true });
 });

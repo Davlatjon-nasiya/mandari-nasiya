@@ -16,7 +16,7 @@
     '</div>' +
     '<div class="card">' +
       '<div class="ahead"><h2>Ulangan kanallar</h2><button class="sec" onclick="loadChannels()">🔄 Yangilash</button></div>' +
-      '<button id="oldBuyButtonsBtn" style="width:100%;margin:10px 0" onclick="addOldBuyButtons()">🛒 Oldingi postlarga ham Sotib olish tugmasini qo‘shish</button>' +
+      '<button id="oldBuyButtonsBtn" style="width:100%;margin:10px 0" onclick="addOldBuyButtons()">🛒 Import qilingan eski postlarga Sotib olish tugmasini qo‘shish</button>' +
       '<div id="oldBuyButtonsMsg" class="muted" style="margin-bottom:10px"></div>' +
       '<div id="channelList"><p class="muted">Yuklanmoqda…</p></div>' +
     '</div>' +
@@ -97,7 +97,7 @@
     msg.textContent = 'Tugmalar qo‘shilmoqda…';
     try {
       var result = await api('/api/admin/channels/buttons', { method: 'POST' });
-      msg.textContent = '✅ ' + result.added + ' ta postga tugma qo‘shildi. Xatolik: ' + result.failed + '. Jami: ' + result.total;
+      msg.textContent = result.total ? ('✅ ' + result.added + ' ta import qilingan postga tugma qo‘shildi. Xatolik: ' + result.failed + '. Jami: ' + result.total) : '⚠️ Hali kanal postlari katalogga import qilinmagan. Telegram bot API kanalning eski tarixini o‘qiy olmaydi.';
     } catch (e) { msg.textContent = '❌ ' + e.message; }
     finally { btn.disabled = false; }
   };

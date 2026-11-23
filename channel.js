@@ -52,6 +52,15 @@ function cleanName(s) {
     .replace(/^[\s\-–—:|·•*_.,]+|[\s\-–—:|·•*_.,]+$/g, '').trim();
 }
 
+function detectCategory(text, name) {
+  const s = (String(text || '') + ' ' + String(name || '')).toLowerCase()
+    .replace(/[ʻ’‘`´]/g, "'").replace(/ё/g, 'е');
+  if (/iphone|айфон|айфон|\bip\s*\d{1,2}\b/.test(s)) return 'iPhone';
+  if (/samsung|самсунг|галакси|\bgalaxy\b/.test(s)) return 'Samsung';
+  if (/naushnik|наушник|quloqchin|airpods|earbuds|headphone|headset|power\s?bank|пауэрбанк|повербанк|zaryadk|зарядк|adapter|адаптер|kabel|кабель|chexol|чехол|case\b|himoya\s?oyna|защитн.*стекл|steklo|glass|watch|soat|часы|kolonka|колонк|speaker|sichqoncha|мыш|klaviatura|клавиатура|aksessuar|аксессуар/.test(s)) return 'Aksessuarlar';
+  return '';
+}
+
 function parsePost(text) {
   text = String(text || '');
   const price = findPrice(text);

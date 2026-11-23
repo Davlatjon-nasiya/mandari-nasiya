@@ -3,12 +3,14 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const Database = require('better-sqlite3');
+const channel = require('./channel');
 
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use('/api/admin/upload', express.json({ limit: '1mb' }));
 app.use(express.json({ limit: '30kb' }));
+channel.mountUi(app, path.join(__dirname, 'public')); // admin paneldagi “📢 Kanal” bo‘limini ulaydi
 app.use(express.static(path.join(__dirname, 'public')));
 
 /* ---------- Database ---------- */
@@ -251,6 +253,7 @@ app.use((req, res, next) => { // admin amallari tarixi + tasdiqlanganda shartnom
     else if (/\/export-payments$/.test(req.path)) t = 'To‘lovlar CSV yuklab olindi';
     else if (/\/group-test$/.test(req.path)) t = 'Guruhga test xabar yuborildi';
     else if (req.method === 'DELETE' && /\/payments\/\d+$/.test(req.path)) t = 'To‘lov #' + req.path.split('/').pop() + ' bekor qilindi';
+    else if (/\/channels(\/-?\d+)?$/.test(req.path)) t = req.method === 'DELETE' ? 'Kanal olib tashlandi: ' + req.path.split('/').pop() : 'Kanal qo‘shildi: ' + String(b.id);
     else if (/\/staff(\/\d+)?$/.test(req.path)) t = req.method === 'DELETE' ? 'Xodim ' + req.path.split('/').pop() + ' olib tashlandi' : 'Xodim qo‘shildi: ' + String(b.id) + ' (' + String(b.role) + ')';
     else if (req.method === 'DELETE' && /\/applications$/.test(req.path)) t = 'Rad etilgan arizalar o‘chirildi';
     audit(req, t);
@@ -786,6 +789,8 @@ app.post('/api/admin/backup', auth, admin, async (req, res) => {
   res.json({ ok: await sendBackup() });
 });
 
+channel.init({ app, db, auth, admin, getSetting, setSetting, adminIds, usdRate, usdOk, toUzs, money, productHooks, scheduleBackup: () => { clearTimeout(bkTimer); bkTimer = setTimeout(sendBackup, 60000); } });
+
 app.use((err, req, res, next) => { // noto‘g‘ri JSON va h.k.
   if (res.headersSent) return next(err);
   res.status(err.status || 500).json({ error: err.status === 400 ? 'So‘rov noto‘g‘ri.' : 'Serverda xatolik.' });
@@ -916,6 +921,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
     } catch (e) { console.error('AutoRestore:', e.message); }
   })();
   bot.on('polling_error', err => console.error('Telegram polling:', err.message));
+  channel.attachBot(bot); // kanal postlarini katalogga avtomatik qo‘shish
 } else {
   console.warn('BOT_TOKEN yoki WEBAPP_URL (https://...) sozlanmagan — bot ishlamaydi.');
 }

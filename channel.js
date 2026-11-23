@@ -145,13 +145,17 @@ function attachBot(b) {
 }
 
 const groups = new Map(); // albom (bir nechta rasm) postlarini yig‘ish
-function addOrderButton(chatId, messageId, productId) {
-  if (!bot || !botUsername) return;
-  const url = 'https://t.me/' + botUsername + '?start=p' + productId;
-  bot.editMessageReplyMarkup(
-    { inline_keyboard: [[{ text: '🛒 Sotib olish / Buyurtma berish', url }]] },
-    { chat_id: chatId, message_id: messageId }
-  ).catch(e => console.error('Order button:', e.message));
+async function addOrderButton(chatId, messageId, productId) {
+  if (!bot) return;
+  try {
+    if (!botUsername) botUsername = (await bot.getMe()).username || '';
+    if (!botUsername) return;
+    const url = 'https://t.me/' + botUsername + '?start=p' + productId;
+    await bot.editMessageReplyMarkup(
+      { inline_keyboard: [[{ text: '🛒 Sotib olish / Buyurtma berish', url }]] },
+      { chat_id: chatId, message_id: messageId }
+    );
+  } catch (e) { console.error('Order button:', e.message); }
 }
 
 function onPost(m, edited) {

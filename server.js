@@ -416,6 +416,70 @@ app.post('/api/admin/login', loginLimit, (req, res) => {
   res.json({ token: webAdminToken(Date.now() + 12 * 60 * 60 * 1000), expiresIn: 43200 });
 });
 
+
+const aiChatHits = new Map();
+app.post('/api/ai-chat', auth, async (req, res) => {
+  try {
+    if (req.authType !== 'telegram') return res.status(401).json({ error: 'Chat uchun Telegram ilovasidan kiring.' });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'AI yordamchi hozir ulanmagan. Adminga murojaat qiling.' });
+    const uid = String(req.user.id), question = String(req.body && req.body.message || '').trim().slice(0, 1000);
+    if (question.length < 2) return res.status(400).json({ error: 'Savolingizni yozing.' });
+    const now = Date.now(), hits = (aiChatHits.get(uid) || []).filter(t => now - t < 60000);
+    if (hits.length >= 10) return res.status(429).json({ error: 'Biroz kuting, keyin yana yozing.' });
+    hits.push(now); aiChatHits.set(uid, hits);
+    const products = db.prepare("SELECT id,name,price,stock,category,variants FROM products WHERE active=1 ORDER BY id DESC LIMIT 150").all().map(p => {
+      let variants=[]; try { variants=JSON.parse(p.variants||'[]'); } catch (_) {}
+      return { id:p.id, name:p.name, price:p.price, stock:p.stock, category:p.category, variants:variants.map(v=>({name:v.name,price:v.price,stock:v.stock})) };
+    });
+    const context = {
+      store:'Mandarin Nasiya, O‘zbekiston',
+      products,
+      installment_months: TERMS,
+      markups_percent: markupsMap(),
+      info: { installment:getSetting('info_installment'), delivery:getSetting('info_delivery'), about:getSetting('info_about') },
+      contact: { phone:getSetting('contact_phone')||SUPPORT_PHONE, telegram:getSetting('contact_telegram'), address:getSetting('contact_address'), hours:getSetting('contact_hours') },
+      branches:getBranches()
+    };
+    const prompt = [
+      'Sen Mandarin Nasiya telefon do‘konining ilova ichidagi sotuv maslahatchisisan. Faqat o‘zbek tilida, sodda, qisqa va muloyim javob ber.',
+      'Faqat berilgan JSON bazadagi mahsulot, narx, qoldiq, muddat, ustama va do‘kon ma’lumotlariga tayangan holda javob ber. Narxlarni so‘mda formatla. Nasiya oylik to‘lovini narx*(1+ustama/100)/oy formulasi bilan hisobla, taxminiy bo‘lsa shunday de.',
+      'Bazadan topilmagan model/narx, aksiya, kafolat, yetkazish sharti yoki mavjudlikni o‘ylab topma. Javob aniq bo‘lmasa yoki shikoyat, qaytarish, to‘lov, shaxsiy ma’lumot, operator so‘ralsa, human=true qil va mijozga operatorga yo‘naltirayotganingni ayt.',
+      'Mijozdan pasport, karta raqami, SMS-kod yoki maxfiy ma’lumot so‘rama. Faqat kerakli bitta aniqlashtiruvchi savol ber.',
+      'Faqat JSON qaytar: {"reply":"mijozga 1-4 jumla","human":false}. Boshqa matn yo‘q.',
+      'Do‘kon bazasi: '+JSON.stringify(context),
+      'Mijoz savoli: '+question
+    ].join('\n');
+    const models=[process.env.GEMINI_MODEL||'gemini-3.8-flash','gemini-3.5-flash-lite'];
+    let payload={}, upstream=null, status=0;
+    for(const model of [...new Set(models)]){
+      for(let attempt=0;attempt<2;attempt++){
+        upstream=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',{
+          method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
+          body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:0.25,responseMimeType:'application/json'}}),
+          signal:AbortSignal.timeout(30000)
+        });
+        payload=await upstream.json().catch(()=>({}));status=upstream.status;
+        if(upstream.ok)break;
+        if(status!==503&&status!==429)break;
+        if(attempt===0)await new Promise(r=>setTimeout(r,1200));
+      }
+      if(upstream&&upstream.ok)break;
+      if(status!==503&&status!==429)break;
+    }
+    if(!upstream||!upstream.ok){console.error('AI chat Gemini:',status,JSON.stringify(payload).slice(0,500));return res.status(502).json({error:'AI hozir javob bera olmayapti. Savolingizni adminga yuborishingiz mumkin.',human:true});}
+    const raw=(payload.candidates||[]).flatMap(x=>x.content&&x.content.parts||[]).map(x=>x.text||'').join('').trim();
+    let answer;try{answer=JSON.parse(raw.replace(/^```json\s*/i,'').replace(/```$/,''));}catch(_){return res.status(502).json({error:'AI javobini o‘qib bo‘lmadi. Qayta urinib ko‘ring.'});}
+    let reply=String(answer.reply||'Savolingizni aniqroq yozing.').slice(0,1200), human=!!answer.human;
+    if(human){
+      const who=[req.user.first_name,req.user.username?'@'+req.user.username:''].filter(Boolean).join(' ')+' · ID '+uid;
+      for(const id of adminIds()) notify(id,'🆘 AI chat operatorga yo‘naltirdi\n👤 '+who+'\n💬 '+question+'\n🤖 AI: '+reply+'\n↩️ Mijozga javob berish uchun botda uning ID sini yozib murojaat qiling.');
+      reply+='\n\n👨‍💼 Operatorga murojaatingiz yuborildi.';
+    }
+    res.json({reply,human});
+  } catch(e){console.error('AI chat:',e.message);res.status(502).json({error:'Ulanishda xatolik. Birozdan keyin urinib ko‘ring.'});}
+});
+
 app.get('/api/catalog', (_, res) => {
   res.json({
     products: db.prepare('SELECT p.id,p.name,p.price,p.stock,p.image,p.images,p.description,p.category,p.variants,p.old_price,p.sale_until,p.price_usd,p.old_price_usd,(SELECT COUNT(*) FROM product_views v WHERE v.product_id=p.id) AS views,(SELECT COUNT(*) FROM favorites f WHERE f.product_id=p.id) AS likes FROM products p WHERE p.active=1 ORDER BY p.id DESC').all().map(shape),

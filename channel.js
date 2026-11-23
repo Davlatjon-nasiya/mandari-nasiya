@@ -85,7 +85,7 @@ function parsePost(text) {
   let stock = 1;
   const s = RE_STOCK1.exec(text) || RE_STOCK2.exec(text);
   if (s) stock = Math.min(999, Number(s[1]));
-  return { name, price: price ? price.value : 0, usd: price ? price.usd : false, assumed: Boolean(price && price.assumed), stock, category: category.slice(0, 40), description: desc.join('\n').slice(0, 1000) };
+  category = detectCategory(text, name) || category;\n  return { name, price: price ? price.value : 0, usd: price ? price.usd : false, assumed: Boolean(price && price.assumed), stock, category: category.slice(0, 40), description: desc.join('\n').slice(0, 1000) };
 }
 
 /* ---------- Bosh sahifaga admin skriptini ulash ---------- */

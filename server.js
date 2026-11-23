@@ -366,7 +366,7 @@ app.post('/api/tradein/analyze', auth, async (req, res) => {
       'O‘zbek tilida qisqa va halol javob ber. JSON qaytar: {"model":"...","confidence":"yuqori/o‘rta/past","condition":"a’lo/yaxshi/o‘rtacha/yomon","visible_issues":["..."],"inspection_notes":["..."],"need_more_photos":["..."],"summary":"..."}.',
       knownModel ? 'Mijoz aytgan model: ' + knownModel + '. Rasm bilan solishtir, mos kelmasa ogohlantir.' : ''
     ].filter(Boolean).join('\n');
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },

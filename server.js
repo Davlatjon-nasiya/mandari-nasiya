@@ -473,7 +473,10 @@ app.post('/api/ai-chat', auth, async (req, res) => {
     let reply=String(answer.reply||'Savolingizni aniqroq yozing.').slice(0,1200), human=!!answer.human;
     if(human){
       const who=[req.user.first_name,req.user.username?'@'+req.user.username:''].filter(Boolean).join(' ')+' · ID '+uid;
-      for(const id of adminIds()) notify(id,'🆘 AI chat operatorga yo‘naltirdi\n👤 '+who+'\n💬 '+question+'\n🤖 AI: '+reply+'\n↩️ Mijozga javob berish uchun botda uning ID sini yozib murojaat qiling.');
+      for(const id of adminIds()) {
+        const m=bot ? await bot.sendMessage(id,'🆘 AI chat operatorga yo‘naltirdi\\n👤 '+who+'\\n💬 '+question+'\\n🤖 AI: '+reply+'\\n↩️ Mijozga javob berish uchun shu xabarga REPLY qiling.').catch(()=>null) : null;
+        if(m) db.prepare('INSERT OR REPLACE INTO support_msgs(admin_chat,admin_msg,user_id) VALUES(?,?,?)').run(String(id),m.message_id,uid);
+      }
       reply+='\n\n👨‍💼 Operatorga murojaatingiz yuborildi.';
     }
     res.json({reply,human});

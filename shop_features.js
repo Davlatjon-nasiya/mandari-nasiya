@@ -41,17 +41,18 @@ module.exports = function mountShopFeatures({ app, db, auth, admin, staff }) {
     res.json({ok:true});
   });
   app.patch('/api/features/cart/:id', auth, (req,res) => {
+    if(req.authType!=='telegram') return res.status(403).json({error:'Telegram ichida oching.'});
     const id=Number(req.params.id), qty=Math.max(0,Math.min(20,Number(req.body.qty)||0));
     if(qty===0) db.prepare('DELETE FROM cart_items WHERE telegram_id=? AND product_id=?').run(String(req.user.id),id);
     else db.prepare('UPDATE cart_items SET qty=? WHERE telegram_id=? AND product_id=?').run(qty,String(req.user.id),id);
     res.json({ok:true});
   });
-  app.delete('/api/features/cart', auth, (req,res) => { db.prepare('DELETE FROM cart_items WHERE telegram_id=?').run(String(req.user.id)); res.json({ok:true}); });
+  app.delete('/api/features/cart', auth, (req,res) => { if(req.authType!=='telegram') return res.status(403).json({error:'Telegram ichida oching.'}); db.prepare('DELETE FROM cart_items WHERE telegram_id=?').run(String(req.user.id)); res.json({ok:true}); });
   app.get('/api/features/referral', auth, (req,res) => {
     const id=String(req.user.id), r=ensureReferral(id);
     const invited=db.prepare('SELECT COUNT(*) n FROM referrals WHERE referred_by=?').get(id).n;
     const points=db.prepare('SELECT COALESCE(SUM(amount),0) n FROM bonus_ledger WHERE telegram_id=?').get(id).n;
-    res.json({code:r.code,invited,points,link:process.env.WEBAPP_URL+'?startapp=ref_'+r.code});
+    res.json({code:r.code,invited,points,link:(process.env.WEBAPP_URL||'')+'?startapp=ref_'+r.code});
   });
   app.post('/api/features/referral/apply', auth, (req,res) => {
     const id=String(req.user.id), code=String(req.body.code||'').trim().toUpperCase();

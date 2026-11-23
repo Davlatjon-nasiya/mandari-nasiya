@@ -85,7 +85,8 @@ function parsePost(text) {
   let stock = 1;
   const s = RE_STOCK1.exec(text) || RE_STOCK2.exec(text);
   if (s) stock = Math.min(999, Number(s[1]));
-  category = detectCategory(text, name) || category;\n  return { name, price: price ? price.value : 0, usd: price ? price.usd : false, assumed: Boolean(price && price.assumed), stock, category: category.slice(0, 40), description: desc.join('\n').slice(0, 1000) };
+  category = detectCategory(text, name) || category;
+  return { name, price: price ? price.value : 0, usd: price ? price.usd : false, assumed: Boolean(price && price.assumed), stock, category: category.slice(0, 40), description: desc.join('\n').slice(0, 1000) };
 }
 
 /* ---------- Bosh sahifaga admin skriptini ulash ---------- */
@@ -123,6 +124,18 @@ function init(c) {
       c.setSetting('channels', JSON.stringify(list));
       res.json({ ok: true, id, title: chat.title || '' });
     } catch (e) { res.status(400).json({ error: 'Kanal topilmadi yoki bot unga kira olmaydi. Botni kanalga admin qiling va ID ni tekshiring. (' + e.message + ')' }); }
+  });
+  app.post('/api/admin/channels/buttons', auth, admin, async (req, res) => {
+    if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
+    const rows = db.prepare('SELECT chat_id, message_id, product_id FROM channel_posts ORDER BY chat_id, message_id').all();
+    let added = 0, failed = 0;
+    for (const row of rows) {
+      try {
+        await addOrderButton(row.chat_id, row.message_id, row.product_id);
+        added++;
+      } catch (_) { failed++; }
+    }
+    res.json({ ok: true, total: rows.length, added, failed });
   });
   app.delete('/api/admin/channels/:id', auth, admin, (req, res) => {
     const id = String(req.params.id);

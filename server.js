@@ -925,6 +925,8 @@ app.post('/api/admin/backup', auth, admin, async (req, res) => {
   res.json({ ok: await sendBackup() });
 });
 
+require('./shop_features')({ app, db, auth, admin, staff });
+
 channel.init({ app, db, auth, admin, getSetting, setSetting, adminIds, usdRate, usdOk, toUzs, money, productHooks, scheduleBackup: () => { clearTimeout(bkTimer); bkTimer = setTimeout(sendBackup, 60000); } });
 
 app.use((err, req, res, next) => { // noto‘g‘ri JSON va h.k.

@@ -366,20 +366,32 @@ app.post('/api/tradein/analyze', auth, async (req, res) => {
       'O‘zbek tilida qisqa va halol javob ber. JSON qaytar: {"model":"...","confidence":"yuqori/o‘rta/past","condition":"a’lo/yaxshi/o‘rtacha/yomon","visible_issues":["..."],"inspection_notes":["..."],"need_more_photos":["..."],"summary":"..."}.',
       knownModel ? 'Mijoz aytgan model: ' + knownModel + '. Rasm bilan solishtir, mos kelmasa ogohlantir.' : ''
     ].filter(Boolean).join('\n');
-    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-    const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: cleanImage } }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: 'application/json' }
-      }),
-      signal: AbortSignal.timeout(45000)
-    });
-    const payload = await upstream.json().catch(() => ({}));
-    if (!upstream.ok) {
-      console.error('Gemini trade-in error:', upstream.status, JSON.stringify(payload).slice(0, 800));
-      return res.status(502).json({ error: 'AI tahlilida xatolik. Birozdan keyin qayta urinib ko‘ring.' });
+    const models = [process.env.GEMINI_MODEL || 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+    const requestBody = {
+      contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: cleanImage } }] }],
+      generationConfig: { temperature: 0.2, responseMimeType: 'application/json' }
+    };
+    let payload = {}, upstream = null, lastStatus = 0;
+    for (const model of [...new Set(models)]) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(45000)
+        });
+        payload = await upstream.json().catch(() => ({}));
+        lastStatus = upstream.status;
+        if (upstream.ok) break;
+        if (upstream.status !== 503 && upstream.status !== 429) break;
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      if (upstream && upstream.ok) break;
+      if (lastStatus !== 503 && lastStatus !== 429) break;
+    }
+    if (!upstream || !upstream.ok) {
+      console.error('Gemini trade-in error:', lastStatus, JSON.stringify(payload).slice(0, 800));
+      return res.status(502).json({ error: lastStatus === 503 || lastStatus === 429 ? 'AI serveri band. Birozdan keyin qayta urinib ko‘ring.' : 'AI tahlilida xatolik. Rasmni qayta yuboring.' });
     }
     const answer = (payload.candidates || []).flatMap(x => x.content && x.content.parts || []).map(x => x.text || '').join('').trim();
     if (!answer) return res.status(502).json({ error: 'AI javob qaytarmadi. Boshqa rasm yuboring.' });

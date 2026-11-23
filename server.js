@@ -360,12 +360,14 @@ app.post('/api/tradein/analyze', auth, async (req, res) => {
     const cleanImage = image.replace(/^data:image\/(?:jpeg|png|webp);base64,/, '');
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanImage)) return res.status(400).json({ error: 'Rasm formati noto‘g‘ri.' });
     const prompt = [
-      'Sen telefon trade-in mutaxassisisan. Rasmda ko‘rinayotgan telefonni tahlil qil.',
-      'Faqat rasmda ko‘rinadigan dalillarga tayan. Modelni aniq bilmasang taxmin ekanini ayt.',
-      'Ekran, korpus, kamera va ko‘rinadigan shikastlarni bahola. Ichki holat, batareya foizi, IMEI yoki original ekanini rasmdan tasdiqlama.',
-      'O‘zbek tilida qisqa va halol javob ber. JSON qaytar: {"model":"...","confidence":"yuqori/o‘rta/past","condition":"a’lo/yaxshi/o‘rtacha/yomon","visible_issues":["..."],"inspection_notes":["..."],"need_more_photos":["..."],"summary":"..."}.',
+      'Sen O‘zbekiston telefon bozorini hisobga oladigan trade-in mutaxassisisan.',
+      'Rasm va mijoz bergan modeldan telefon modelini aniqlashga harakat qil. Faqat ko‘rinadigan dalillarga tayan.',
+      'Tashqi holatini qisqa bahola. Batareya, IMEI, ichki nosozlik va original ekanini rasmga qarab tasdiqlama.',
+      'Taxminiy trade-in narxini O‘zbekiston so‘mida MIN va MAX oralig‘ida ber. Narxni faqat modelni yetarlicha aniqlagan bo‘lsang taxmin qil; model noma’lum bo‘lsa min va max qiymatlarini null qil. Xotira hajmi yoki bozor narxi noaniq bo‘lsa diapazonni kengroq qil.',
+      'Juda qisqa javob qaytar. JSON: {"model":"...","confidence":"yuqori/o‘rta/past","condition":"a’lo/yaxshi/o‘rtacha/yomon","visible_issues":["eng ko‘pi 2 ta qisqa nuqta"],"estimated_price_min":0,"estimated_price_max":0,"summary":"1 jumla"}. Narx raqam bo‘lsin, so‘m belgisisiz. Boshqa maydon qo‘shma.',
+      'Bu faqat surat bo‘yicha taxmin. Yakuniy narx ustaxona tekshiruvidan keyin belgilanadi.',
       knownModel ? 'Mijoz aytgan model: ' + knownModel + '. Rasm bilan solishtir, mos kelmasa ogohlantir.' : ''
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\\n');
     const models = [process.env.GEMINI_MODEL || 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: cleanImage } }] }],
@@ -398,7 +400,7 @@ app.post('/api/tradein/analyze', auth, async (req, res) => {
     let result;
     try { result = JSON.parse(answer.replace(/^\`\`\`json\s*/i, '').replace(/\`\`\`$/, '')); }
     catch (_) { return res.status(502).json({ error: 'AI javobini o‘qib bo‘lmadi. Qayta urinib ko‘ring.' }); }
-    res.json({ ok: true, analysis: result, note: 'Bu faqat surat bo‘yicha dastlabki baho. Yakuniy trade-in narxi ustaxona tekshiruvi, batareya, IMEI va komplektatsiyadan keyin belgilanadi.' });
+    res.json({ ok: true, analysis: result, note: 'Taxminiy narx. Yakuniy summa telefon tekshiruvidan keyin belgilanadi.' });
   } catch (e) {
     console.error('Trade-in:', e.message);
     res.status(502).json({ error: 'AI xizmatiga ulanib bo‘lmadi. Keyinroq urinib ko‘ring.' });

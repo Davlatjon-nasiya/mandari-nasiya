@@ -91,7 +91,7 @@ function mountUi(app, publicDir) {
 }
 
 /* ---------- Server qismi ---------- */
-let ctx = null, bot = null, me = null;
+let ctx = null, bot = null, me = null, botUsername = '';
 
 function init(c) {
   ctx = c;
@@ -128,6 +128,7 @@ function getChannels() {
 
 function attachBot(b) {
   bot = b;
+  b.getMe().then(u => { botUsername = u.username || ''; }).catch(() => {});
   bot.on('channel_post', m => onPost(m, false));
   bot.on('edited_channel_post', m => onPost(m, true));
   bot.on('callback_query', q => { // adminga kelgan xabardagi “Yashirish / Ko‘rsatish” tugmasi
@@ -144,6 +145,15 @@ function attachBot(b) {
 }
 
 const groups = new Map(); // albom (bir nechta rasm) postlarini yig‘ish
+function addOrderButton(chatId, messageId, productId) {
+  if (!bot || !botUsername) return;
+  const url = 'https://t.me/' + botUsername + '?start=p' + productId;
+  bot.editMessageReplyMarkup(
+    { inline_keyboard: [[{ text: '🛒 Sotib olish / Buyurtma berish', url }]] },
+    { chat_id: chatId, message_id: messageId }
+  ).catch(e => console.error('Order button:', e.message));
+}
+
 function onPost(m, edited) {
   try {
     const cid = String(m.chat.id);
@@ -213,6 +223,7 @@ async function importPosts(msgs, edited) {
   const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category,variants,old_price,sale_until,price_usd,old_price_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(p.name, price, p.stock, imgs[0] || '', JSON.stringify(imgs), p.description, p.category, '[]', 0, '', usd ? p.price : 0, 0);
   db.prepare('INSERT OR REPLACE INTO channel_posts(chat_id,message_id,product_id) VALUES(?,?,?)').run(cid, anchor.message_id, r.lastInsertRowid);
+  addOrderButton(cid, anchor.message_id, r.lastInsertRowid);
   ctx.scheduleBackup();
   tell('✅ Kanaldan yangi telefon katalogga qo‘shildi\n📱 ' + p.name + '\n💰 ' + priceTxt + '\n📦 Soni: ' + p.stock + (p.category ? '\n🗂 ' + p.category : '') + '\n🖼 Rasm: ' + imgs.length + (imgs.length ? '' : ' (yuklab bo‘lmadi)') + warn + '\n\nNoto‘g‘ri bo‘lsa, postni tahrirlang yoki shu yerdan yashiring.',
     { inline_keyboard: [[{ text: '🙈 Yashirish', callback_data: 'cp:hide:' + r.lastInsertRowid }]] });

@@ -8,7 +8,7 @@
   panel.innerHTML =
     '<div class="card">' +
       '<h2>📢 Telegram kanalidan omborga avtomatik qo‘shish</h2>' +
-      '<p class="muted">Bot admin qilingan kanaldagi yangi rasmli postlarni o‘qiydi. Post izohida model nomi va narx bo‘lishi shart. Masalan: iPhone 13 Pro<br>Narxi: $450<br>Soni: 2 ta</p>' +
+      '<p class="muted">Bot admin qilingan kanaldagi yangi matnli yoki rasmli postlarni o‘qiydi. Post matnida model nomi va narx bo‘lishi shart. Masalan: iPhone 13 Pro<br>Narxi: $450<br>Soni: 2 ta</p>' +
       '<label>Kanal username yoki ID</label>' +
       '<input id="channelId" placeholder="@kanal_nomi yoki -1001234567890" autocomplete="off">' +
       '<button id="channelAddBtn" style="width:100%" onclick="addChannel()">➕ Kanalni ulash</button>' +
@@ -24,10 +24,10 @@
         '<li>Botni Telegram kanalingizga administrator qilib qo‘shing.</li>' +
         '<li>Botga kanal postlarini ko‘rish imkonini bering.</li>' +
         '<li>Yuqoriga kanal username yoki ID sini kiriting.</li>' +
-        '<li>Yangi mahsulotni rasm bilan, model va narx yozilgan izoh orqali joylang.</li>' +
+        '<li>Yangi mahsulotni matn ko‘rinishida yoki rasmga model va narx yozilgan izoh qo‘shib joylang.</li>' +
         '<li>Bot mahsulotni katalog/omborga avtomatik qo‘shadi va adminlarga xabar beradi.</li>' +
       '</ol>' +
-      '<p class="muted">Muhim: bot kanalga ulanganidan keyin joylangan yangi postlar import qilinadi. Oldingi postlar Telegram Bot API orqali avtomatik o‘qilmaydi. Birinchi qatorga mahsulot nomini, narxga esa $450 yoki 5 500 000 so‘m kabi aniq format yozing.</p>' +
+      '<p class="muted">Muhim: bot kanalga ulanganidan keyin joylangan yangi postlar import qilinadi. Oldingi postlar Telegram Bot API orqali avtomatik o‘qilmaydi. Birinchi qatorga mahsulot nomini, narxga esa $450 yoki 5 500 000 so‘m kabi aniq format yozing. Rasm bo‘lmasa ham mahsulot qo‘shiladi.</p>' +
     '</div>';
   document.getElementById('aBody').appendChild(panel);
 

@@ -16,6 +16,8 @@
     '</div>' +
     '<div class="card">' +
       '<div class="ahead"><h2>Ulangan kanallar</h2><button class="sec" onclick="loadChannels()">🔄 Yangilash</button></div>' +
+      '<button id="oldBuyButtonsBtn" style="width:100%;margin:10px 0" onclick="addOldBuyButtons()">🛒 Oldingi postlarga ham Sotib olish tugmasini qo‘shish</button>' +
+      '<div id="oldBuyButtonsMsg" class="muted" style="margin-bottom:10px"></div>' +
       '<div id="channelList"><p class="muted">Yuklanmoqda…</p></div>' +
     '</div>' +
     '<div class="card">' +
@@ -27,7 +29,7 @@
         '<li>Yangi mahsulotni matn ko‘rinishida yoki rasmga model va narx yozilgan izoh qo‘shib joylang.</li>' +
         '<li>Bot mahsulotni katalog/omborga avtomatik qo‘shadi va adminlarga xabar beradi.</li>' +
       '</ol>' +
-      '<p class="muted">Muhim: bot kanalga ulanganidan keyin joylangan yangi postlar import qilinadi. Oldingi postlar Telegram Bot API orqali avtomatik o‘qilmaydi. Birinchi qatorga mahsulot nomini, narxga esa $450 yoki 5 500 000 so‘m kabi aniq format yozing. Rasm bo‘lmasa ham mahsulot qo‘shiladi.</p>' +
+      '<p class="muted">Muhim: bot kanalga ulanganidan keyin joylangan yangi postlar import qilinadi. Bazaga oldin import qilingan postlarga yuqoridagi tugma orqali Sotib olish tugmasini qo‘shish mumkin. Bot kanalga ulanmasidan oldingi, katalogga import qilinmagan postlar esa Telegram Bot API orqali avtomatik olinmaydi. Birinchi qatorga mahsulot nomini, narxga esa $450 yoki 5 500 000 so‘m kabi aniq format yozing. Rasm bo‘lmasa ham mahsulot qo‘shiladi.</p>' +
     '</div>';
   document.getElementById('aBody').appendChild(panel);
 
@@ -85,6 +87,19 @@
     } finally {
       button.disabled = false;
     }
+  };
+
+  window.addOldBuyButtons = async function () {
+    var btn = document.getElementById('oldBuyButtonsBtn');
+    var msg = document.getElementById('oldBuyButtonsMsg');
+    if (!confirm('Bazaga import qilingan barcha eski kanal postlariga Sotib olish tugmasi qo‘shilsinmi?')) return;
+    btn.disabled = true;
+    msg.textContent = 'Tugmalar qo‘shilmoqda…';
+    try {
+      var result = await api('/api/admin/channels/buttons', { method: 'POST' });
+      msg.textContent = '✅ ' + result.added + ' ta postga tugma qo‘shildi. Xatolik: ' + result.failed + '. Jami: ' + result.total;
+    } catch (e) { msg.textContent = '❌ ' + e.message; }
+    finally { btn.disabled = false; }
   };
 
   window.removeChannel = async function (id) {

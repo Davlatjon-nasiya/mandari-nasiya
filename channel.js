@@ -151,7 +151,7 @@ function onPost(m, edited) {
       bot.sendMessage(m.chat.id, '🆔 Kanal ID: ' + cid + '\nUni admin panel → 📢 Kanal bo‘limiga kiriting. (Bu xabarni keyin o‘chirib tashlashingiz mumkin.)').catch(() => {});
       return;
     }
-    if (!getChannels().some(x => x.id === cid) || !m.photo || !m.photo.length) return;
+    if (!getChannels().some(x => x.id === cid) || (!(m.caption || m.text) && (!m.photo || !m.photo.length))) return;
     if (!m.media_group_id) return void importPosts([m], edited).catch(e => console.error('Channel:', e.message));
     const key = cid + ':' + m.media_group_id;
     let g = groups.get(key);
@@ -181,7 +181,7 @@ async function saveImage(sizes) {
 async function importPosts(msgs, edited) {
   const { db } = ctx;
   msgs.sort((a, b) => a.message_id - b.message_id);
-  const anchor = msgs.find(x => (x.caption || '').trim()) || msgs[0], cid = String(anchor.chat.id), text = (anchor.caption || '').trim();
+  const anchor = msgs.find(x => (x.caption || x.text || '').trim()) || msgs[0], cid = String(anchor.chat.id), text = (anchor.caption || anchor.text || '').trim();
   if (!text) return; // izohsiz rasm — e’tiborga olinmaydi
   const tell = (t, kb) => ctx.adminIds().forEach(a => bot.sendMessage(a, t, { disable_web_page_preview: true, ...(kb ? { reply_markup: kb } : {}) }).catch(() => {}));
   const mapped = db.prepare('SELECT product_id FROM channel_posts WHERE chat_id=? AND message_id=?').get(cid, anchor.message_id);
@@ -209,7 +209,7 @@ async function importPosts(msgs, edited) {
   }
 
   const imgs = [];
-  for (const m of msgs.slice(0, 6)) { const u = await saveImage(m.photo); if (u) imgs.push(u); }
+  for (const m of msgs.slice(0, 6)) { if (!m.photo || !m.photo.length) continue; const u = await saveImage(m.photo); if (u) imgs.push(u); }
   const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category,variants,old_price,sale_until,price_usd,old_price_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(p.name, price, p.stock, imgs[0] || '', JSON.stringify(imgs), p.description, p.category, '[]', 0, '', usd ? p.price : 0, 0);
   db.prepare('INSERT OR REPLACE INTO channel_posts(chat_id,message_id,product_id) VALUES(?,?,?)').run(cid, anchor.message_id, r.lastInsertRowid);

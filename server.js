@@ -54,6 +54,7 @@ db.exec("CREATE TABLE IF NOT EXISTS staff_users(telegram_id TEXT PRIMARY KEY, ro
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(telegram_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', last_remind TEXT NOT NULL DEFAULT '', blocked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS favorites(telegram_id TEXT NOT NULL, product_id INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(telegram_id, product_id));
+CREATE TABLE IF NOT EXISTS product_views(product_id INTEGER NOT NULL, telegram_id TEXT NOT NULL, viewed_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(product_id, telegram_id));
 CREATE TABLE IF NOT EXISTS support_msgs(admin_chat TEXT NOT NULL, admin_msg INTEGER NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY(admin_chat, admin_msg));
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT DEFAULT CURRENT_TIMESTAMP, actor TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT, app_id INTEGER NOT NULL, amount INTEGER NOT NULL, paid_at TEXT DEFAULT CURRENT_TIMESTAMP, note TEXT NOT NULL DEFAULT '', taker TEXT NOT NULL DEFAULT '');
@@ -403,7 +404,7 @@ app.post('/api/admin/login', loginLimit, (req, res) => {
 
 app.get('/api/catalog', (_, res) => {
   res.json({
-    products: db.prepare('SELECT id,name,price,stock,image,images,description,category,variants,old_price,sale_until,price_usd,old_price_usd FROM products WHERE active=1 ORDER BY id DESC').all().map(shape),
+    products: db.prepare('SELECT p.id,p.name,p.price,p.stock,p.image,p.images,p.description,p.category,p.variants,p.old_price,p.sale_until,p.price_usd,p.old_price_usd,(SELECT COUNT(*) FROM product_views v WHERE v.product_id=p.id) AS views,(SELECT COUNT(*) FROM favorites f WHERE f.product_id=p.id) AS likes FROM products p WHERE p.active=1 ORDER BY p.id DESC').all().map(shape),
     markups: markupsMap(),
     bot: botUser,
     branches: getBranches(),
@@ -679,6 +680,13 @@ app.post('/api/admin/settings', auth, admin, (req, res) => {
   res.json({ ok: true, repriced });
 });
 
+app.post('/api/products/:id/view', auth, (req, res) => {
+  if (req.authType !== 'telegram') return res.status(403).json({ error: 'Faqat Telegram ichida.' });
+  const id = Number(req.params.id), uid = String(req.user.id);
+  if (!Number.isSafeInteger(id) || !db.prepare('SELECT 1 FROM products WHERE id=? AND active=1').get(id)) return res.status(404).json({ error: 'Mahsulot topilmadi.' });
+  db.prepare('INSERT OR IGNORE INTO product_views(product_id,telegram_id) VALUES(?,?)').run(id, uid);
+  res.json({ views: db.prepare('SELECT COUNT(*) n FROM product_views WHERE product_id=?').get(id).n, likes: db.prepare('SELECT COUNT(*) n FROM favorites WHERE product_id=?').get(id).n });
+});
 app.get('/api/favorites', auth, (req, res) => res.json(db.prepare('SELECT product_id FROM favorites WHERE telegram_id=?').all(String(req.user.id)).map(r => r.product_id)));
 app.post('/api/favorites/:id', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(403).json({ error: 'Faqat Telegram ichida.' });

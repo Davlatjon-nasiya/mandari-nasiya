@@ -9,7 +9,7 @@ h1{font-size:22px;margin:0}h2{font-size:18px;margin:0 0 8px}a{color:var(--a2)}
 .promo{background:linear-gradient(120deg,var(--a),#e8501b);border-radius:16px;padding:12px 14px;font-weight:700;margin-bottom:12px;color:#fff}
 .card{background:var(--c);border:1px solid var(--b);border-radius:18px;padding:14px;margin:10px 0}
 button,input,select,textarea{font:inherit;border-radius:12px;padding:12px;outline:0}
-button{border:0;background:linear-gradient(120deg,var(--a),var(--a2));color:#1d1306;font-weight:700;cursor:pointer}button:disabled{opacity:.5}
+button{border:0;background:linear-gradient(120deg,var(--a),var(--a2));color:#1d1306;font-weight:700;cursor:pointer;transform:translateZ(0);transition:transform .09s ease,filter .09s ease,box-shadow .09s ease;touch-action:manipulation}button:active,.chip:active,.nav button:active,.hb:active,.pc:active{transform:scale(.96);filter:brightness(.88);box-shadow:inset 0 2px 5px rgba(0,0,0,.22)}button:focus-visible{outline:2px solid var(--a2);outline-offset:2px}button:disabled{opacity:.5;transform:none;filter:none;box-shadow:none}.pc{transition:transform .09s ease,filter .09s ease}.pc:active{transform:scale(.985)}
 input,select,textarea{width:100%;margin:5px 0 10px;background:#0e1630;color:var(--t);border:1px solid var(--b)}
 .sec{background:var(--c2);color:var(--t)}.danger{background:#c0392b;color:#fff}.hidden{display:none!important}
 .row{display:flex;gap:8px}.row>*{flex:1}label{font-size:13px;color:var(--m)}.muted{color:var(--m);font-size:13px}
@@ -329,7 +329,7 @@ setInterval(function(){var b=$('ban');if(!b||b.classList.contains('hidden')||ban
 var bnr=[];
 function renderBnr(){$('bnrList').innerHTML=bnr.map(function(x,i){return '<div class="card" style="margin:6px 0"><img src="'+esc(x.img)+'" style="width:100%;border-radius:10px"><input placeholder="Bosilganda ochiladigan havola (https://…, ixtiyoriy)" value="'+esc(x.link||'')+'" onchange="bnr['+i+'].link=this.value"><button class="danger" onclick="bnr.splice('+i+',1);renderBnr()">🗑 O‘chirish</button></div>'}).join('')||'<p class="muted">Banner yo‘q.</p>'}
 async function addBnr(inp){var f=inp.files[0];if(!f)return;if(bnr.length>=6){say('6 tagacha banner qo‘yish mumkin.');return}try{say('Yuklanmoqda…');var d=await resizeImg(f),r=await api('/api/admin/upload',{method:'POST',body:JSON.stringify({data:d})});bnr.push({img:r.url,link:''});renderBnr();say('✅ Banner qo‘shildi. “Bannerlarni saqlash” ni bosing.')}catch(e){say(e.message||'Yuklanmadi')}inp.value=''}
-function hap(){try{tg.HapticFeedback.impactOccurred('light')}catch(e){}}
+var lastHapAt=0;function hap(){var now=Date.now();if(now-lastHapAt<80)return;lastHapAt=now;try{if(tg&&tg.HapticFeedback&&tg.HapticFeedback.impactOccurred)tg.HapticFeedback.impactOccurred('light');else if(navigator.vibrate)navigator.vibrate(12)}catch(e){}}document.addEventListener('pointerdown',function(e){var el=e.target&&e.target.closest&&e.target.closest('button,a,.pc,.hb,summary');if(el&&!el.disabled)hap()},true);document.addEventListener('click',function(e){if(e.detail===0){var el=e.target&&e.target.closest&&e.target.closest('button,a,.pc,.hb,summary');if(el&&!el.disabled)hap()}},true);
 function openLink(u){hap();try{if(/^https:\/\/t\.me\//.test(u)&&tg&&tg.openTelegramLink)tg.openTelegramLink(u);else if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}catch(e){window.open(u,'_blank')}}
 function igUrl(){var u=((contact||{}).instagram||'').replace(/^@/,'');return u?'https://www.instagram.com/'+encodeURIComponent(u):''}
 function openIG(){var u=igUrl();if(u)openLink(u)}

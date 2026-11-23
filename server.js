@@ -9,7 +9,7 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use('/api/admin/upload', express.json({ limit: '1mb' }));
-app.use(express.json({ limit: '30kb' }));
+app.use(express.json({ limit: '8mb' }));
 channel.mountUi(app, path.join(__dirname, 'public')); // admin paneldagi “📢 Kanal” bo‘limini ulaydi
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -345,6 +345,53 @@ app.use((req, res, next) => { // har o‘zgarishdan 1 daqiqa keyin avtomatik zax
 /* ---------- Public API ---------- */
 app.get('/health', (_, res) => res.json({ ok: true }));
 app.get('/api/config', (_, res) => res.json({ webAdminEnabled: Boolean(process.env.ADMIN_PASSWORD) }));
+
+// AI Trade-in: suratdan telefon modelini va tashqi holatini tahlil qilish
+app.post('/api/tradein/analyze', auth, async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'AI hozir ulanmagan. Admin GEMINI_API_KEY ni Render Environment ga kiritsin.' });
+    const image = String(req.body && req.body.image || '');
+    const mimeType = String(req.body && req.body.mimeType || '');
+    const knownModel = String(req.body && req.body.model || '').trim().slice(0, 100);
+    if (!image || image.length > 7 * 1024 * 1024) return res.status(400).json({ error: 'Telefon rasmini yuboring (hajmi 5 MB dan oshmasin).' });
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) return res.status(400).json({ error: 'Faqat JPG, PNG yoki WEBP rasm yuboring.' });
+    const cleanImage = image.replace(/^data:image\/(?:jpeg|png|webp);base64,/, '');
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanImage)) return res.status(400).json({ error: 'Rasm formati noto‘g‘ri.' });
+    const prompt = [
+      'Sen telefon trade-in mutaxassisisan. Rasmda ko‘rinayotgan telefonni tahlil qil.',
+      'Faqat rasmda ko‘rinadigan dalillarga tayan. Modelni aniq bilmasang taxmin ekanini ayt.',
+      'Ekran, korpus, kamera va ko‘rinadigan shikastlarni bahola. Ichki holat, batareya foizi, IMEI yoki original ekanini rasmdan tasdiqlama.',
+      'O‘zbek tilida qisqa va halol javob ber. JSON qaytar: {"model":"...","confidence":"yuqori/o‘rta/past","condition":"a’lo/yaxshi/o‘rtacha/yomon","visible_issues":["..."],"inspection_notes":["..."],"need_more_photos":["..."],"summary":"..."}.',
+      knownModel ? 'Mijoz aytgan model: ' + knownModel + '. Rasm bilan solishtir, mos kelmasa ogohlantir.' : ''
+    ].filter(Boolean).join('\n');
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: cleanImage } }] }],
+        generationConfig: { temperature: 0.2, responseMimeType: 'application/json' }
+      }),
+      signal: AbortSignal.timeout(45000)
+    });
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      console.error('Gemini trade-in error:', upstream.status, JSON.stringify(payload).slice(0, 800));
+      return res.status(502).json({ error: 'AI tahlilida xatolik. Birozdan keyin qayta urinib ko‘ring.' });
+    }
+    const answer = (payload.candidates || []).flatMap(x => x.content && x.content.parts || []).map(x => x.text || '').join('').trim();
+    if (!answer) return res.status(502).json({ error: 'AI javob qaytarmadi. Boshqa rasm yuboring.' });
+    let result;
+    try { result = JSON.parse(answer.replace(/^\`\`\`json\s*/i, '').replace(/\`\`\`$/, '')); }
+    catch (_) { return res.status(502).json({ error: 'AI javobini o‘qib bo‘lmadi. Qayta urinib ko‘ring.' }); }
+    res.json({ ok: true, analysis: result, note: 'Bu faqat surat bo‘yicha dastlabki baho. Yakuniy trade-in narxi ustaxona tekshiruvi, batareya, IMEI va komplektatsiyadan keyin belgilanadi.' });
+  } catch (e) {
+    console.error('Trade-in:', e.message);
+    res.status(502).json({ error: 'AI xizmatiga ulanib bo‘lmadi. Keyinroq urinib ko‘ring.' });
+  }
+});
+
 
 app.post('/api/admin/login', loginLimit, (req, res) => {
   const password = String(req.body && req.body.password || '');

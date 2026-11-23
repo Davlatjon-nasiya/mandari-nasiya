@@ -29,7 +29,7 @@ module.exports = function mountShopFeatures({ app, db, auth, admin, staff }) {
   app.get('/api/features/cart', auth, (req,res) => {
     if(req.authType!=='telegram') return res.status(403).json({error:'Telegram ichida oching.'});
     const id=String(req.user.id);
-    res.json(db.prepare('SELECT c.product_id id,c.qty,p.name,p.price,p.stock,p.image,p.images FROM cart_items c JOIN products p ON p.id=c.product_id WHERE c.telegram_id=? AND p.active=1 ORDER BY c.created_at DESC').all(id));
+    res.json(db.prepare('SELECT c.product_id id,c.qty,p.name,p.price,p.stock,p.image FROM cart_items c JOIN products p ON p.id=c.product_id WHERE c.telegram_id=? AND p.active=1 ORDER BY c.created_at DESC').all(id));
   });
   app.post('/api/features/cart/:id', auth, (req,res) => {
     if(req.authType!=='telegram') return res.status(403).json({error:'Telegram ichida oching.'});

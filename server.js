@@ -594,7 +594,7 @@ app.post('/api/applications', auth, (req, res) => {
 
 app.get('/api/applications/mine', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(403).json({ error: 'Bu bo‘lim Telegram foydalanuvchilari uchun.' });
-  res.json(db.prepare('SELECT a.id,a.months,a.down,a.status,a.note,a.created_at,a.total,a.monthly,a.pay_type,a.approved_at,a.contract_sent,p.name AS product,p.price AS price FROM applications a LEFT JOIN products p ON a.product_id=p.id WHERE a.telegram_id=? ORDER BY a.id DESC').all(String(req.user.id)).map(x => ({ ...x, ...payInfo(x), hist: db.prepare('SELECT amount,paid_at FROM payments WHERE app_id=? ORDER BY id DESC LIMIT 24').all(x.id) })));
+  res.json(db.prepare('SELECT a.id,a.months,a.down,a.status,a.note,a.created_at,a.total,a.monthly,a.pay_type,a.approved_at,a.contract_sent,a.items_json,p.name AS product,p.price AS price FROM applications a LEFT JOIN products p ON a.product_id=p.id WHERE a.telegram_id=? ORDER BY a.id DESC').all(String(req.user.id)).map(x => {let items=[];try{items=x.items_json?JSON.parse(x.items_json):[]}catch(_){}return {...x,product:items.length?items.map(i=>i.name+' × '+i.qty).join(', '):x.product,...payInfo(x),hist:db.prepare('SELECT amount,paid_at FROM payments WHERE app_id=? ORDER BY id DESC LIMIT 24').all(x.id)}}));
 });
 
 
@@ -604,7 +604,7 @@ app.get('/api/admin', auth, cashier, (req, res) => {
   res.json({
     products: db.prepare('SELECT * FROM products ORDER BY id DESC').all().map(shape),
     markups: markupsMap(),
-    applications: db.prepare('SELECT a.*,p.name AS product,COALESCE(u.risky,0) AS risky FROM applications a LEFT JOIN products p ON a.product_id=p.id LEFT JOIN users u ON u.telegram_id=a.telegram_id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => ({ ...r, has_secret: Boolean(card_enc), ...payInfo(r) })),
+    applications: db.prepare('SELECT a.*,p.name AS product,COALESCE(u.risky,0) AS risky FROM applications a LEFT JOIN products p ON a.product_id=p.id LEFT JOIN users u ON u.telegram_id=a.telegram_id ORDER BY a.id DESC').all().map(({ passport_enc, card_enc, ...r }) => {let items=[];try{items=r.items_json?JSON.parse(r.items_json):[]}catch(_){}return {...r,product:items.length?items.map(i=>i.name+' × '+i.qty).join(', '):r.product,items,has_secret:Boolean(card_enc),...payInfo(r)}}),
     markup: Number(getSetting('markup', '50')),
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
     promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') },

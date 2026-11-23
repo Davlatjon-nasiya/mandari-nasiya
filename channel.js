@@ -131,8 +131,7 @@ function init(c) {
     let added = 0, failed = 0;
     for (const row of rows) {
       try {
-        await addOrderButton(row.chat_id, row.message_id, row.product_id);
-        added++;
+        if (await addOrderButton(row.chat_id, row.message_id, row.product_id)) added++; else failed++;
       } catch (_) { failed++; }
     }
     res.json({ ok: true, total: rows.length, added, failed });
@@ -177,7 +176,8 @@ async function addOrderButton(chatId, messageId, productId) {
       { inline_keyboard: [[{ text: '🛒 Sotib olish / Buyurtma berish', url }]] },
       { chat_id: chatId, message_id: messageId }
     );
-  } catch (e) { console.error('Order button:', e.message); }
+    return true;
+  } catch (e) { console.error('Order button:', e.message); return false; }
 }
 
 function onPost(m, edited) {

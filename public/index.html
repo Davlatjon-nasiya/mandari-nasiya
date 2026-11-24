@@ -103,6 +103,26 @@ button{background:#e97824;color:#fff;border-radius:10px;box-shadow:none}
 .muted{color:#777e74}
 @media(min-width:700px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.im{height:220px}body{padding-left:22px;padding-right:22px}.top{margin-left:-22px;margin-right:-22px;padding-left:22px;padding-right:22px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* Color correction: remove leftover dark animated background */
+:root{--bg:#f5f5f2;--c:#ffffff;--c2:#f0f1ed;--b:#e5e7e1;--t:#252923;--m:#777e74;--a:#e97824;--a2:#cf5f16}
+html,body{background:#f5f5f2!important;color:#252923!important}
+.bg{display:none!important}
+.top{background:rgba(255,255,255,.97)!important;border-bottom:1px solid #e8e9e4}
+.top h1{color:#252923!important}
+.promo{background:#fff1e5!important;color:#9b4d16!important;border-color:#f2d7c1!important}
+.pc,.card{background:#fff!important;border-color:#e6e8e2!important;color:#252923!important}
+.im{background:#fafaf8!important}
+.pb,.pn{color:#252923!important}
+.pm{background:#f1f2ef!important;color:#737a70!important}
+.nav{background:rgba(255,255,255,.98)!important;border-color:#e5e7e1!important}
+.nav button{color:#737a70!important}
+.nav button.on{background:#fff1e5!important;color:#c85d18!important}
+.sec,.chip{background:#f0f1ed!important;color:#30352f!important}
+.chip.on{background:#252923!important;color:#fff!important}
+.sh{background:#fff!important;color:#252923!important}
+#splash{background:#fff!important;color:#252923!important}
+.res{background:#fff3e8!important;color:#a84e13!important;border-color:#f0ddca!important}
 </style></head><body>
 <div id="splash"><div class="lg">🍊</div><div class="sn">Mandarin Nasiya</div><div class="ss">Nasiyaga qulay xarid</div><div class="spin"></div></div><div class="bg" id="bg"><i></i><i></i><i></i></div>
 

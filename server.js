@@ -1164,7 +1164,7 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
   let marketingBusy=false;
   async function runMarketing(){
     if(marketingBusy)return;
-    const now=marketingNow(),slot=marketingSlots.find(x=>x.hour===now.hour&&now.minute===0);if(!slot)return;
+    const now=marketingNow(),slot=marketingSlots.find(x=>x.hour===now.hour&&now.minute<=2);if(!slot)return;
     marketingBusy=true;
     try{
       const users=db.prepare("SELECT telegram_id FROM users WHERE blocked=0 AND ads_enabled=1 AND NOT EXISTS(SELECT 1 FROM marketing_sends m WHERE m.telegram_id=users.telegram_id AND m.send_date=? AND m.slot=?)").all(now.date,slot.slot);

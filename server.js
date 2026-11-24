@@ -75,6 +75,9 @@ const markupFor = m => { try { const o = JSON.parse(getSetting('markups', '{}'))
 const colsOf = t => db.prepare('PRAGMA table_info(' + t + ')').all().map(c => c.name);
 for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"], ['products', 'old_price', 'INTEGER NOT NULL DEFAULT 0'], ['products', 'sale_until', "TEXT NOT NULL DEFAULT ''"], ['products', 'price_usd', 'REAL NOT NULL DEFAULT 0'], ['products', 'old_price_usd', 'REAL NOT NULL DEFAULT 0'], ['applications', 'variant', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_model', "TEXT NOT NULL DEFAULT ''"], ['applications', 'trade_value', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'promo', "TEXT NOT NULL DEFAULT ''"], ['users', 'note', "TEXT NOT NULL DEFAULT ''"], ['users', 'credit_limit', 'INTEGER NOT NULL DEFAULT 0'], ['users', 'risky', 'INTEGER NOT NULL DEFAULT 0'], ['applications', 'delivery', "TEXT NOT NULL DEFAULT 'pickup'"], ['applications', 'branch', "TEXT NOT NULL DEFAULT ''"], ['applications', 'address', "TEXT NOT NULL DEFAULT ''"], ['applications', 'geo', "TEXT NOT NULL DEFAULT ''"], ['applications', 'contract_sent', "TEXT NOT NULL DEFAULT ''"], ['applications', 'last_overdue_remind', "TEXT NOT NULL DEFAULT ''"]])
   if (!colsOf(t).includes(c)) db.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + d);
+if (!colsOf('users').includes('ads_enabled')) db.exec('ALTER TABLE users ADD COLUMN ads_enabled INTEGER NOT NULL DEFAULT 1');
+db.exec("CREATE TABLE IF NOT EXISTS marketing_sends(telegram_id TEXT NOT NULL, send_date TEXT NOT NULL, slot TEXT NOT NULL, product_id INTEGER NOT NULL, sent_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(telegram_id,send_date,slot))");
+
 const getBranches = () => getSetting('branches').split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0]).map(x => ({ name: x[0], address: x[1] || '', phone: x[2] || '' }));
 const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
 
@@ -1061,6 +1064,26 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
       if (adminIds().includes(String(msg.from.id))) bot.sendMessage(msg.chat.id, '👨‍💼 Admin: mijoz yozsa xabar shu yerga keladi. Javob berish uchun xabarga REPLY qiling — javob mijozga yetadi.');
     } catch (e) { console.error('/start:', e.message); }
   });
+  bot.onText(/^\/stopads(?:@\w+)?\s*$/i, msg => {
+    if (msg.chat.type !== 'private') return;
+    upsertUser(msg.from);
+    db.prepare('UPDATE users SET ads_enabled=0 WHERE telegram_id=?').run(String(msg.from.id));
+    bot.sendMessage(msg.chat.id, '🔕 Reklama xabarlari to‘xtatildi. Qayta yoqish uchun /startads buyrug‘ini yuboring.').catch(() => {});
+  });
+  bot.onText(/^\/startads(?:@\w+)?\s*$/i, msg => {
+    if (msg.chat.type !== 'private') return;
+    upsertUser(msg.from);
+    db.prepare('UPDATE users SET ads_enabled=1,blocked=0 WHERE telegram_id=?').run(String(msg.from.id));
+    bot.sendMessage(msg.chat.id, '🔔 Reklama xabarlari yoqildi. Kuniga 3 martagacha mahsulot tavsiyasi olasiz.').catch(() => {});
+  });
+  bot.on('callback_query', q => {
+    if (q.data !== 'marketing:off') return;
+    const uid=String(q.from.id);
+    db.prepare('UPDATE users SET ads_enabled=0 WHERE telegram_id=?').run(uid);
+    bot.answerCallbackQuery(q.id,{text:'Reklama xabarlari to‘xtatildi.'}).catch(()=>{});
+    if(q.message) bot.editMessageReplyMarkup({inline_keyboard:[]},{chat_id:q.message.chat.id,message_id:q.message.message_id}).catch(()=>{});
+    bot.sendMessage(uid,'🔕 Reklama xabarlari o‘chirildi. Qayta yoqish: /startads').catch(()=>{});
+  });
   bot.onText(/^\/id(@\w+)?\s*$/, msg => bot.sendMessage(msg.chat.id, msg.chat.type === 'private' ? '🆔 Sizning Telegram ID raqamingiz: ' + msg.from.id : '🆔 Bu guruhning ID raqami: ' + msg.chat.id + '\nUni admin paneldagi Sozlamalar → Guruh bo‘limiga kiriting.').catch(() => {}));
   bot.on('callback_query', q => {
     const ap = /^ap:(\d+):(approved|rejected)$/.exec(q.data || '');
@@ -1135,6 +1158,32 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
       db.prepare('UPDATE applications SET last_pay_remind=? WHERE id=?').run(today, a.id);
     }
   }
+  const marketingSlots=[{hour:10,slot:'10:00'},{hour:15,slot:'15:00'},{hour:20,slot:'20:00'}];
+  const marketingNow=()=>{const p={};new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tashkent',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date()).forEach(x=>{if(x.type!=='literal')p[x.type]=x.value});return {date:p.year+'-'+p.month+'-'+p.day,hour:Number(p.hour),minute:Number(p.minute)}};
+  const marketingProductFor=uid=>db.prepare(`SELECT p.* FROM product_views v JOIN products p ON p.id=v.product_id WHERE v.telegram_id=? AND p.active=1 AND p.stock>0 ORDER BY v.viewed_at DESC LIMIT 1`).get(uid)||db.prepare('SELECT * FROM products WHERE active=1 AND stock>0 ORDER BY price ASC,id DESC LIMIT 1').get();
+  let marketingBusy=false;
+  async function runMarketing(){
+    if(marketingBusy)return;
+    const now=marketingNow(),slot=marketingSlots.find(x=>x.hour===now.hour&&now.minute===0);if(!slot)return;
+    marketingBusy=true;
+    try{
+      const users=db.prepare("SELECT telegram_id FROM users WHERE blocked=0 AND ads_enabled=1 AND NOT EXISTS(SELECT 1 FROM marketing_sends m WHERE m.telegram_id=users.telegram_id AND m.send_date=? AND m.slot=?)").all(now.date,slot.slot);
+      for(const row of users){
+        const uid=String(row.telegram_id),p=marketingProductFor(uid);if(!p)break;
+        let images=[];try{images=JSON.parse(p.images||'[]')}catch(_){}
+        const photo=images[0]||p.image||'',link='https://t.me/'+botUser+'?start=p'+p.id;
+        const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nSiz ko‘rgan mahsulot tavsiyasi. Batafsil ma’lumot va nasiya shartlari ilovada.';
+        try{
+          const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}],[{text:'🔕 Reklamani to‘xtatish',callback_data:'marketing:off'}]]}};
+          if(photo)await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});else await bot.sendMessage(uid,caption,opts);
+          db.prepare('INSERT OR IGNORE INTO marketing_sends(telegram_id,send_date,slot,product_id) VALUES(?,?,?,?)').run(uid,now.date,slot.slot,p.id);
+        }catch(e){if(/blocked|deactivated|chat not found/i.test(e.message||''))db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(uid);else console.error('Marketing send '+uid+':',e.message)}
+        await new Promise(resolve=>setTimeout(resolve,45));
+      }
+    }finally{marketingBusy=false}
+  }
+  setTimeout(()=>runMarketing().catch(e=>console.error('Marketing:',e.message)),5000);
+  setInterval(()=>runMarketing().catch(e=>console.error('Marketing:',e.message)),60000);
   setTimeout(() => runReminders().catch(e => console.error('Reminders:', e.message)), 90000);
   setInterval(() => runReminders().catch(e => console.error('Reminders:', e.message)), 30 * 60 * 1000);
   setInterval(() => runOverdue().catch(e => console.error('Overdue:', e.message)), 60 * 60 * 1000);

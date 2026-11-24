@@ -90,7 +90,7 @@ const popularProduct = () => {
   if (row) return row;
   return db.prepare(`
     SELECT p.id,p.name,p.price,p.price_usd,p.stock,p.image,p.images,
-      (SELECT COUNT(*) FROM product_views v WHERE v.product_id=p.id) AS views
+      (SELECT COUNT(DISTINCT v.telegram_id) FROM product_views v WHERE v.product_id=p.id) AS views
     FROM products p WHERE p.active=1 AND p.stock>0
     ORDER BY views DESC,p.id DESC LIMIT 1
   `).get();
@@ -868,7 +868,7 @@ app.post('/api/products/:id/view', auth, (req, res) => {
   const id = Number(req.params.id), uid = String(req.user.id);
   if (!Number.isSafeInteger(id) || !db.prepare('SELECT 1 FROM products WHERE id=? AND active=1').get(id)) return res.status(404).json({ error: 'Mahsulot topilmadi.' });
   db.prepare('INSERT INTO product_views(product_id,telegram_id,viewed_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(product_id,telegram_id) DO UPDATE SET viewed_at=CURRENT_TIMESTAMP').run(id, uid);
-  res.json({ views: db.prepare('SELECT COUNT(*) n FROM product_views WHERE product_id=?').get(id).n, likes: db.prepare('SELECT COUNT(*) n FROM favorites WHERE product_id=?').get(id).n });
+  res.json({ views: db.prepare('SELECT COUNT(DISTINCT telegram_id) n FROM product_views WHERE product_id=?').get(id).n, likes: db.prepare('SELECT COUNT(*) n FROM favorites WHERE product_id=?').get(id).n });
 });
 app.get('/api/favorites', auth, (req, res) => res.json(db.prepare('SELECT product_id FROM favorites WHERE telegram_id=?').all(String(req.user.id)).map(r => r.product_id)));
 app.post('/api/favorites/:id', auth, (req, res) => {

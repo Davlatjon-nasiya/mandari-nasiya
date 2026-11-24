@@ -77,6 +77,51 @@ for (const [t, c, d] of [['products', 'variants', "TEXT NOT NULL DEFAULT '[]'"],
   if (!colsOf(t).includes(c)) db.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + d);
 const getBranches = () => getSetting('branches').split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0]).map(x => ({ name: x[0], address: x[1] || '', phone: x[2] || '' }));
 const getBanners = () => { try { return JSON.parse(getSetting('banners', '[]')); } catch (_) { return []; } };
+
+// So‘nggi 7 kunda eng ko‘p turli mijoz ko‘rgan mahsulot uchun avtomatik reklama.
+const popularProduct = () => {
+  const row = db.prepare(`
+    SELECT p.id,p.name,p.price,p.price_usd,p.stock,p.image,p.images,
+      COUNT(v.telegram_id) AS views
+    FROM products p JOIN product_views v ON v.product_id=p.id
+    WHERE p.active=1 AND p.stock>0 AND v.viewed_at >= datetime('now','-7 days')
+    GROUP BY p.id ORDER BY views DESC, p.id DESC LIMIT 1
+  `).get();
+  if (row) return row;
+  return db.prepare(`
+    SELECT p.id,p.name,p.price,p.price_usd,p.stock,p.image,p.images,
+      (SELECT COUNT(*) FROM product_views v WHERE v.product_id=p.id) AS views
+    FROM products p WHERE p.active=1 AND p.stock>0
+    ORDER BY views DESC,p.id DESC LIMIT 1
+  `).get();
+};
+let featuredAdJob = false;
+async function refreshFeaturedAd(product) {
+  if (!product || featuredAdJob) return;
+  featuredAdJob = true;
+  try {
+    let images=[]; try { images=JSON.parse(product.images||'[]'); } catch (_) {}
+    const ad={id:product.id,name:product.name,price:product.price,price_usd:product.price_usd||0,image:images[0]||product.image||'',views:product.views||0,headline:'Ko‘pchilik tanlayotgan telefon!',updatedAt:Date.now()};
+    const apiKey=process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
+      const prompt='Mandarin Nasiya telefon do‘koni uchun reklama sarlavhasi yoz. Mahsulot: '+product.name+'. Narx: '+Number(product.price).toLocaleString('uz-UZ')+' so‘m. O‘zbek tilida 4–8 so‘z, jozibali, lekin yolg‘on chegirma yoki kafolat va’da qilma. Faqat sarlavhani qaytar.';
+      const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',{
+        method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
+        body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:40}}),
+        signal:AbortSignal.timeout(7000)
+      });
+      if(response.ok){
+        const data=await response.json();
+        const headline=(data.candidates||[]).flatMap(x=>x.content&&x.content.parts||[]).map(x=>x.text||'').join(' ').trim().replace(/[\r\n]+/g,' ').slice(0,90);
+        if(headline) ad.headline=headline;
+      }
+    }
+    setSetting('featured_ad',JSON.stringify(ad));
+  } catch(e) { console.error('Featured ad Gemini:',e.message); }
+  finally { featuredAdJob=false; }
+}
+
 const markupsMap = () => Object.fromEntries(TERMS.map(t => [t, markupFor(t)]));
 const shape = p => {
   let im = [], vs = [];
@@ -488,7 +533,14 @@ app.post('/api/ai-chat', auth, async (req, res) => {
   } catch(e){console.error('AI chat:',e.message);res.status(502).json({error:'Ulanishda xatolik. Birozdan keyin urinib ko‘ring.'});}
 });
 
-app.get('/api/catalog', (_, res) => {
+app.get('/api/catalog', async (_, res) => {
+  const popular=popularProduct();
+  let featuredAd=null;
+  try { featuredAd=JSON.parse(getSetting('featured_ad','null')); } catch (_) {}
+  if (popular && (!featuredAd || featuredAd.id!==popular.id || Date.now()-Number(featuredAd.updatedAt||0)>6*60*60*1000)) {
+    refreshFeaturedAd(popular);
+    if (featuredAd && featuredAd.id!==popular.id) featuredAd=null;
+  }
   res.json({
     products: db.prepare('SELECT p.id,p.name,p.price,p.stock,p.image,p.images,p.description,p.category,p.variants,p.old_price,p.sale_until,p.price_usd,p.old_price_usd,(SELECT COUNT(*) FROM product_views v WHERE v.product_id=p.id) AS views,(SELECT COUNT(*) FROM favorites f WHERE f.product_id=p.id) AS likes FROM products p WHERE p.active=1 ORDER BY p.id DESC').all().map(shape),
     markups: markupsMap(),
@@ -497,7 +549,7 @@ app.get('/api/catalog', (_, res) => {
     markup: Number(getSetting('markup', '50')),
     terms: TERMS,
     contact: { phone: getSetting('contact_phone'), telegram: getSetting('contact_telegram'), address: getSetting('contact_address'), hours: getSetting('contact_hours'), instagram: getSetting('contact_instagram') },
-    promo: getSetting('promo'), banners: getBanners(), info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') }
+    promo: getSetting('promo'), banners: getBanners(), featuredAd, info: { installment: getSetting('info_installment'), delivery: getSetting('info_delivery'), about: getSetting('info_about') }
   });
 });
 
@@ -811,7 +863,7 @@ app.post('/api/products/:id/view', auth, (req, res) => {
   if (req.authType !== 'telegram') return res.status(403).json({ error: 'Faqat Telegram ichida.' });
   const id = Number(req.params.id), uid = String(req.user.id);
   if (!Number.isSafeInteger(id) || !db.prepare('SELECT 1 FROM products WHERE id=? AND active=1').get(id)) return res.status(404).json({ error: 'Mahsulot topilmadi.' });
-  db.prepare('INSERT OR IGNORE INTO product_views(product_id,telegram_id) VALUES(?,?)').run(id, uid);
+  db.prepare('INSERT INTO product_views(product_id,telegram_id,viewed_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(product_id,telegram_id) DO UPDATE SET viewed_at=CURRENT_TIMESTAMP').run(id, uid);
   res.json({ views: db.prepare('SELECT COUNT(*) n FROM product_views WHERE product_id=?').get(id).n, likes: db.prepare('SELECT COUNT(*) n FROM favorites WHERE product_id=?').get(id).n });
 });
 app.get('/api/favorites', auth, (req, res) => res.json(db.prepare('SELECT product_id FROM favorites WHERE telegram_id=?').all(String(req.user.id)).map(r => r.product_id)));

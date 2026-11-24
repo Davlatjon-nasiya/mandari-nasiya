@@ -381,10 +381,11 @@ async function sendBackup() {
   for (const id of adminIds()) {
     try {
       const old = getSetting('bk_' + id);
-      if (old) await bot.deleteMessage(id, Number(old)).catch(() => {});
-      const m = await bot.sendDocument(id, buf, { caption: '💾 Zaxira nusxa. Ma’lumot yo‘qolsa, bot o‘zi tiklaydi yoki shu faylni botga qayta yuboring.', disable_notification: true }, { filename: name, contentType: 'application/json' });
-      setSetting('bk_' + id, m.message_id);
+      // Avval yangi nusxani muvaffaqiyatli yuboramiz va pin qilamiz; eski nusxa shundan keyingina o‘chiriladi.
+      const m = await bot.sendDocument(id, buf, { caption: '💾 Yangi zaxira nusxa. Eski nusxa yangisi saqlangandan keyin almashtiriladi.', disable_notification: true }, { filename: name, contentType: 'application/json' });
       await bot.pinChatMessage(id, m.message_id, { disable_notification: true }).catch(() => {});
+      setSetting('bk_' + id, m.message_id);
+      if (old && Number(old) !== Number(m.message_id)) await bot.deleteMessage(id, Number(old)).catch(() => {});
       ok = true;
     } catch (e) { console.error('Backup:', e.message); }
   }
@@ -397,6 +398,14 @@ app.use((req, res, next) => { // har o‘zgarishdan 1 daqiqa keyin avtomatik zax
 });
 
 /* ---------- Public API ---------- */
+app.get('/api/admin/diagnostics', auth, admin, (req,res)=>{
+  const counts={};
+  for(const table of ['products','applications','users','product_views','staff_users']) {
+    try { counts[table]=db.prepare('SELECT COUNT(*) n FROM '+table).get().n; } catch(e) { counts[table]=null; }
+  }
+  let pinnedBackup=false;
+  res.json({database:{configured:!!process.env.DB_PATH,path:process.env.DB_PATH||path.join(__dirname,'mandarin.db'),persistentDiskRecommended:!process.env.DB_PATH,counts},bot:{connected:!!bot,username:botUser||null},backup:{lastMessageIds:adminIds().map(id=>({admin:id,message_id:getSetting('bk_'+id)||null}))},broadcast:{activeJobs:broadcastJobs.size}});
+});
 app.get('/health', (_, res) => res.json({ ok: true }));
 app.get('/api/config', (_, res) => res.json({ webAdminEnabled: Boolean(process.env.ADMIN_PASSWORD) }));
 
@@ -1035,7 +1044,7 @@ app.post('/api/admin/broadcast/product', auth, admin, async (req,res)=>{
         if(/blocked|deactivated|chat not found|bot was blocked|user is deactivated/i.test(reason))db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(uid);
         console.error('Broadcast send failed '+uid+':',reason);
       }
-      await new Promise(resolve=>setTimeout(resolve,45));
+      await new Promise(resolve=>setTimeout(resolve,100));
     }
     job.status='done';job.finished_at=Date.now();
   })().catch(e=>{job.status='error';job.error=String(e.message||e)});

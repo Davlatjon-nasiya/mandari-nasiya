@@ -67,7 +67,7 @@ details.acc>summary .muted{font-weight:400}details.acc>div{padding:0 14px 14px}
 .filebtn{display:block;text-align:center;background:var(--c2);border:1px dashed var(--a);border-radius:12px;padding:12px;margin:6px 0 10px;cursor:pointer;color:var(--t);font-size:15px;font-weight:600}.filebtn input{display:none}
 .vrow{display:grid;grid-template-columns:1.5fr 1fr .7fr auto;gap:6px;align-items:center}.vrow input{margin:3px 0;padding:10px}.vrow button{padding:9px 12px}
 
-html{height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}body{min-height:100%;overscroll-behavior-y:contain}input,textarea,select,button{font-size:16px;max-width:100%}#v-ai .card{min-width:0}#aiChatMsgs{scroll-behavior:smooth;scrollbar-width:thin}#aiChatInput{font-size:16px!important;min-height:48px}@media(max-height:650px){#aiChatMsgs{height:34vh!important;min-height:130px!important}#v-ai .card{padding:10px}}
+html{height:100%;min-height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%;overscroll-behavior-y:none}body{min-height:var(--tg-viewport-height,100dvh);overscroll-behavior-y:contain;width:100%;max-width:760px;margin-inline:auto;padding-bottom:calc(96px + env(safe-area-inset-bottom))}.sh{max-height:calc(var(--tg-viewport-height,100dvh) - 12px);max-height:min(92vh,calc(var(--tg-viewport-height,100dvh) - 12px));overscroll-behavior:contain}.nav{bottom:0;padding-bottom:calc(6px + env(safe-area-inset-bottom))}input,textarea,select,button{font-size:16px;max-width:100%}#v-ai .card{min-width:0}#aiChatMsgs{scroll-behavior:smooth;scrollbar-width:thin}#aiChatInput{font-size:16px!important;min-height:48px}@media(max-height:650px){#aiChatMsgs{height:34vh!important;min-height:130px!important}#v-ai .card{padding:10px}}
 
 .auto-ad{display:flex;align-items:center;gap:12px;position:relative;overflow:hidden;margin:10px 0 14px;padding:12px;border-radius:16px;background:linear-gradient(120deg,#252b40,#3b2b25);border:1px solid rgba(255,138,31,.35);color:#fff;cursor:pointer;min-height:112px}
 .auto-ad img{width:104px;height:104px;object-fit:contain;background:#fff;border-radius:12px;flex:none}
@@ -226,7 +226,18 @@ body{max-width:1180px;padding:18px 24px 112px;background:#080a0d;color:#f6f7fa}
 <div id="ov" class="ov hidden" onclick="if(event.target===this)closeP()"><div class="sh" id="sh"></div></div>
 
 <script>
-var tg=window.Telegram&&window.Telegram.WebApp;if(tg){tg.ready();tg.expand()}
+var tg=window.Telegram&&window.Telegram.WebApp;
+function syncTelegramViewport(){
+  var h=(tg&&(tg.viewportStableHeight||tg.viewportHeight))||window.innerHeight||window.visualViewport&&window.visualViewport.height||0;
+  if(h>0)document.documentElement.style.setProperty('--tg-viewport-height',h+'px');
+}
+if(tg){
+  try{tg.ready();tg.expand();if(typeof tg.disableVerticalSwipes==='function')tg.disableVerticalSwipes();}catch(e){console.warn('Telegram viewport setup:',e)}
+  syncTelegramViewport();
+  if(typeof tg.onEvent==='function')tg.onEvent('viewportChanged',syncTelegramViewport);
+}
+window.addEventListener('resize',syncTelegramViewport,{passive:true});
+if(window.visualViewport)window.visualViewport.addEventListener('resize',syncTelegramViewport,{passive:true});
 var initData=tg?tg.initData:'',$=function(i){return document.getElementById(i)},token=sessionStorage.getItem('mandarinAdminToken')||'';
 var TERMS=[3,6,12,18,24],products=[],markups={},defMk=50,contact={},promoText='',favs=[],cat='',sel=null,A=null,info={},banners=[],bi=0,botUser='',branches=[];
 var STATUS={new:'Yangi',review:'Ko‘rib chiqilmoqda',approved:'Tasdiqlandi',preparing:'Tayyorlanmoqda',shipping:'Yo‘lda',delivered:'Topshirildi',rejected:'Rad etildi'},PHONE_RE=/^[+\d\s()-]{9,20}$/;

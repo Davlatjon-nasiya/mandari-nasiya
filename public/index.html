@@ -72,6 +72,15 @@ html{height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}body{min-he
 .auto-ad{display:flex;align-items:center;gap:12px;position:relative;overflow:hidden;margin:10px 0 14px;padding:12px;border-radius:16px;background:linear-gradient(120deg,#252b40,#3b2b25);border:1px solid rgba(255,138,31,.35);color:#fff;cursor:pointer;min-height:112px}
 .auto-ad img{width:104px;height:104px;object-fit:contain;background:#fff;border-radius:12px;flex:none}
 .auto-ad .ad-copy{min-width:0;flex:1}.auto-ad .ad-kicker{font-size:10px;letter-spacing:.8px;color:#ffb347;font-weight:800;text-transform:uppercase}.auto-ad .ad-title{font-size:15px;font-weight:800;line-height:1.25;margin:5px 0}.auto-ad .ad-name{font-size:12px;opacity:.85}.auto-ad .ad-price{font-size:14px;color:#ffb347;font-weight:800;margin-top:6px}.auto-ad .ad-cta{display:inline-block;margin-top:6px;background:#ff8a1f;color:#201305;padding:6px 10px;border-radius:8px;font-size:11px;font-weight:800}
+
+/* Show products immediately; promotions follow the product grid */
+.promo{padding:8px 12px;margin-bottom:8px;font-size:13px;border-radius:12px}
+#q{margin-top:2px;margin-bottom:6px;padding:11px 16px}
+#catH{margin:4px 0 4px}
+.chips{padding:2px 0 5px;gap:6px}
+.chip{padding:6px 11px}
+#v-shop>h2:not(#catH){margin-top:4px!important;margin-bottom:4px}
+#v-shop>.row select{padding:7px 10px;margin:3px 0 7px;font-size:13px}
 </style></head><body>
 <div id="splash"><div class="lg">🍊</div><div class="sn">Mandarin Nasiya</div><div class="ss">Nasiyaga qulay xarid</div><div class="spin"></div></div><div class="bg" id="bg"><i></i><i></i><i></i></div>
 
@@ -79,8 +88,8 @@ html{height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}body{min-he
 <div class="promo" id="promo">🔥 Qulay to‘lov, ishonchli xizmat!</div><div id="msg"></div>
 
 <main id="shop">
-<div id="v-shop"><input id="q" placeholder="🔍 Telefon qidirish…" oninput="renderShop()"><div id="autoAd" class="auto-ad hidden"></div><div class="ban hidden" id="ban"></div><h2 id="catH" class="hidden">Kataloglar</h2><div class="chips" id="cats"></div><h2 style="margin-top:6px">Barcha mahsulotlar</h2>
-<div class="row"><select id="sort" onchange="renderShop()"><option value="new">Yangilari</option><option value="cheap">Arzonlari</option><option value="exp">Qimmatlari</option></select></div><div id="list"><div class="grid"><div class="sk"></div><div class="sk"></div></div></div></div>
+<div id="v-shop"><input id="q" placeholder="🔍 Telefon qidirish…" oninput="renderShop()"><h2 id="catH" class="hidden">Kataloglar</h2><div class="chips" id="cats"></div><h2 style="margin-top:6px">Barcha mahsulotlar</h2>
+<div class="row"><select id="sort" onchange="renderShop()"><option value="new">Yangilari</option><option value="cheap">Arzonlari</option><option value="exp">Qimmatlari</option></select></div><div id="list"><div class="grid"><div class="sk"></div><div class="sk"></div></div></div><div id="autoAd" class="auto-ad hidden"></div><div class="ban hidden" id="ban"></div></div>
 <div id="v-fav" class="hidden"><h2>❤️ Sevimlilar</h2><div id="favList"></div></div><div id="v-cart" class="hidden"><h2>🛒 Savatcha</h2><div id="cartList"></div><button style="width:100%" onclick="clearCart()">Savatni bo‘shatish</button><div id="cartCheckout"></div></div><div id="v-rewards" class="hidden"><h2>🎁 Bonus va referal</h2><div id="rewardBody"></div></div>
 <div id="v-mine" class="hidden"><h2>📋 Arizalarim</h2><div class="card">📞 Javob kelmasa, qo‘ng‘iroq qiling: <a href="tel:+998916235655">+998 91 623 56 55</a></div><div id="mineList"></div></div>
 <div id="v-calc" class="hidden"><div class="card"><h2>🧮 Kalkulyator</h2><label>Telefon narxi (so‘m)</label><input id="cp" type="number" min="1" oninput="calcM()"><label>Boshlang‘ich to‘lov</label><input id="cd" type="number" min="0" value="0" oninput="calcM()"><label>Muddat</label><select id="cm" onchange="calcM()"><option>3</option><option>6</option><option selected>12</option><option>18</option><option>24</option></select><div class="res" id="cr">Narxni kiriting</div><div id="cs"></div></div></div>

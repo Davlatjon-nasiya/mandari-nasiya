@@ -1020,12 +1020,20 @@ app.post('/api/admin/broadcast/product', auth, admin, async (req,res)=>{
     for(const uid of targets){
       try{
         const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}],[{text:'🔕 Reklamani to‘xtatish',callback_data:'marketing:off'}]]}};
-        if(photo)await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});
-        else await bot.sendMessage(uid,caption,opts);
+        if(photo){
+          try{await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});}
+          catch(photoErr){console.error('Broadcast photo failed '+uid+':',photoErr.message);await bot.sendMessage(uid,caption+'\\n\\n🖼 Rasmni hozir yuklab bo‘lmadi.',opts);}
+        }else await bot.sendMessage(uid,caption,opts);
         job.sent++;
       }catch(e){
         job.failed++;
-        if(/blocked|deactivated|chat not found/i.test(e.message||''))db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(uid);
+        const reason=String(e.message||e).slice(0,240);
+        job.last_error=reason;
+        job.errors=(job.errors||0)+1;
+        job.error_samples=job.error_samples||[];
+        if(job.error_samples.length<3)job.error_samples.push({user:uid,reason});
+        if(/blocked|deactivated|chat not found|bot was blocked|user is deactivated/i.test(reason))db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(uid);
+        console.error('Broadcast send failed '+uid+':',reason);
       }
       await new Promise(resolve=>setTimeout(resolve,45));
     }

@@ -1000,6 +1000,43 @@ app.post('/api/admin/applications/:id/to-group', auth, staff, (req, res) => {
   if (!sendAppCard(Number(req.params.id), true)) return res.status(404).json({ error: 'Ariza topilmadi.' });
   res.json({ ok: true });
 });
+const broadcastJobs = new Map();
+app.post('/api/admin/broadcast/product', auth, admin, async (req,res)=>{
+  if(!bot)return res.status(503).json({error:'Bot ulanmagan.'});
+  if(!botUser)return res.status(503).json({error:'Bot username hali yuklanmadi. Birozdan keyin urinib ko‘ring.'});
+  const id=Number(req.body&&req.body.product_id);
+  const p=db.prepare('SELECT * FROM products WHERE id=? AND active=1 AND stock>0').get(id);
+  if(!Number.isSafeInteger(id)||!p)return res.status(400).json({error:'Faol va omborda bor mahsulotni tanlang.'});
+  const jobId=crypto.randomBytes(8).toString('hex');
+  const targets=db.prepare('SELECT telegram_id FROM users WHERE blocked=0 AND ads_enabled=1').all().map(x=>String(x.telegram_id));
+  const job={id:jobId,product_id:id,total:targets.length,sent:0,failed:0,status:'sending',created_at:Date.now()};
+  broadcastJobs.set(jobId,job);
+  res.json({ok:true,job_id:jobId,total:targets.length});
+  (async()=>{
+    let images=[];try{images=JSON.parse(p.images||'[]')}catch(_){}
+    const photo=images[0]||p.image||'';
+    const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nBatafsil ma’lumot va nasiya shartlari uchun tugmani bosing.';
+    const link='https://t.me/'+botUser+'?start=p'+p.id;
+    for(const uid of targets){
+      try{
+        const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}],[{text:'🔕 Reklamani to‘xtatish',callback_data:'marketing:off'}]]}};
+        if(photo)await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});
+        else await bot.sendMessage(uid,caption,opts);
+        job.sent++;
+      }catch(e){
+        job.failed++;
+        if(/blocked|deactivated|chat not found/i.test(e.message||''))db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(uid);
+      }
+      await new Promise(resolve=>setTimeout(resolve,45));
+    }
+    job.status='done';job.finished_at=Date.now();
+  })().catch(e=>{job.status='error';job.error=String(e.message||e)});
+});
+app.get('/api/admin/broadcast/:jobId', auth, admin, (req,res)=>{
+  const job=broadcastJobs.get(String(req.params.jobId));
+  if(!job)return res.status(404).json({error:'Yuborish jarayoni topilmadi.'});
+  res.json(job);
+});
 app.post('/api/admin/group-test', auth, admin, async (req, res) => {
   if (!bot) return res.status(503).json({ error: 'Bot ulanmagan.' });
   const g = String(groupId());

@@ -241,6 +241,7 @@ async function importPosts(msgs, edited) {
       ctx.productHooks(prod, { id: prod.id, name: p.name, price, stock: p.stock });
     }
     ctx.scheduleBackup();
+    await addOrderButton(cid, anchor.message_id, prod.id);
     return tell('♻️ Kanal posti tahrirlandi — katalog yangilandi\n📱 ' + p.name + '\n💰 ' + priceTxt + '\n📦 Soni: ' + p.stock + warn, { inline_keyboard: [[{ text: prod.active ? '🙈 Yashirish' : '👁 Ko‘rsatish', callback_data: 'cp:' + (prod.active ? 'hide' : 'show') + ':' + prod.id }]] });
   }
 
@@ -249,9 +250,9 @@ async function importPosts(msgs, edited) {
   const r = db.prepare('INSERT INTO products(name,price,stock,image,images,description,category,variants,old_price,sale_until,price_usd,old_price_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(p.name, price, p.stock, imgs[0] || '', JSON.stringify(imgs), p.description, p.category, '[]', 0, '', usd ? p.price : 0, 0);
   db.prepare('INSERT OR REPLACE INTO channel_posts(chat_id,message_id,product_id) VALUES(?,?,?)').run(cid, anchor.message_id, r.lastInsertRowid);
-  addOrderButton(cid, anchor.message_id, r.lastInsertRowid);
+  const orderButtonAdded = await addOrderButton(cid, anchor.message_id, r.lastInsertRowid);
   ctx.scheduleBackup();
-  tell('✅ Kanaldan yangi telefon katalogga qo‘shildi\n📱 ' + p.name + '\n💰 ' + priceTxt + '\n📦 Soni: ' + p.stock + (p.category ? '\n🗂 ' + p.category : '') + '\n🖼 Rasm: ' + imgs.length + (imgs.length ? '' : ' (yuklab bo‘lmadi)') + warn + '\n\nNoto‘g‘ri bo‘lsa, postni tahrirlang yoki shu yerdan yashiring.',
+  tell('✅ Kanaldan yangi telefon katalogga qo‘shildi\n📱 ' + p.name + '\n💰 ' + priceTxt + '\n📦 Soni: ' + p.stock + (p.category ? '\n🗂 ' + p.category : '') + '\n🖼 Rasm: ' + imgs.length + (imgs.length ? '' : ' (yuklab bo‘lmadi)') + warn + '\n🛒 Sotib olish tugmasi: ' + (orderButtonAdded ? 'qo‘shildi' : 'qo‘shilmadi — botga kanalda xabarlarni tahrirlash huquqini bering va Admin panel → Kanal → Tugmalarni qo‘shish ni bosing.') + '\n\nNoto‘g‘ri bo‘lsa, postni tahrirlang yoki shu yerdan yashiring.',
     { inline_keyboard: [[{ text: '🙈 Yashirish', callback_data: 'cp:hide:' + r.lastInsertRowid }]] });
 }
 

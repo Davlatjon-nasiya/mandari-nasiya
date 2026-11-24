@@ -1024,11 +1024,11 @@ app.post('/api/admin/broadcast/product', auth, admin, async (req,res)=>{
   (async()=>{
     let images=[];try{images=JSON.parse(p.images||'[]')}catch(_){}
     const photo=images[0]||p.image||'';
-    const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nBatafsil ma’lumot va nasiya shartlari uchun tugmani bosing.';
+    const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nBatafsil ma’lumot va nasiya shartlari uchun tugmani bosing.\nReklama xabarlarini to‘xtatish: /stopads';
     const link='https://t.me/'+botUser+'?start=p'+p.id;
     for(const uid of targets){
       try{
-        const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}],[{text:'🔕 Reklamani to‘xtatish',callback_data:'marketing:off'}]]}};
+        const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}]]}};
         if(photo){
           try{await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});}
           catch(photoErr){console.error('Broadcast photo failed '+uid+':',photoErr.message);await bot.sendMessage(uid,caption+'\\n\\n🖼 Rasmni hozir yuklab bo‘lmadi.',opts);}
@@ -1226,9 +1226,9 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
         const uid=String(row.telegram_id),p=marketingProductFor(uid);if(!p)break;
         let images=[];try{images=JSON.parse(p.images||'[]')}catch(_){}
         const photo=images[0]||p.image||'',link='https://t.me/'+botUser+'?start=p'+p.id;
-        const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nSiz ko‘rgan mahsulot tavsiyasi. Batafsil ma’lumot va nasiya shartlari ilovada.';
+        const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nSiz ko‘rgan mahsulot tavsiyasi. Batafsil ma’lumot va nasiya shartlari ilovada.\nReklama xabarlarini to‘xtatish: /stopads';
         try{
-          const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}],[{text:'🔕 Reklamani to‘xtatish',callback_data:'marketing:off'}]]}};
+          const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}]]}};
           if(photo)await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});else await bot.sendMessage(uid,caption,opts);
           db.prepare('INSERT OR IGNORE INTO marketing_sends(telegram_id,send_date,slot,product_id) VALUES(?,?,?,?)').run(uid,now.date,slot.slot,p.id);
         }catch(e){if(/blocked|deactivated|chat not found/i.test(e.message||''))db.prepare('UPDATE users SET blocked=1 WHERE telegram_id=?').run(uid);else console.error('Marketing send '+uid+':',e.message)}

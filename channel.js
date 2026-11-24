@@ -67,9 +67,19 @@ function parsePost(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const strip = l => { let c = l; if (price && c.includes(price.raw)) c = c.replace(price.raw, ' '); return cleanName(c.replace(RE_PKEY, ' ')); };
   let nameIdx = -1, name = '';
+  // Avval aniq Model:/Nomi: qatorini qidiramiz; reklama jumlasini model deb olmaymiz.
+  const explicitModel = /^(?:📱\s*)?(?:model|nomi|telefon|товар|название|name)\s*[:：–—-]\s*(.+)$/iu;
   for (let i = 0; i < lines.length; i++) {
-    const c = strip(lines[i]);
-    if (c.length >= 2 && /\p{L}/u.test(c)) { nameIdx = i; name = c.slice(0, 100); break; }
+    const m = lines[i].match(explicitModel);
+    if (m && cleanName(m[1]).length >= 2) { nameIdx = i; name = cleanName(m[1]).slice(0, 100); break; }
+  }
+  if (!name) {
+    for (let i = 0; i < lines.length; i++) {
+      const c = strip(lines[i]);
+      if (c.length >= 2 && /\p{L}/u.test(c) && !/^(zamonaviy|kuchli|sifatli|arzon|aksiya|chegirma|dostavka|yetkazib)/iu.test(c)) {
+        nameIdx = i; name = c.slice(0, 100); break;
+      }
+    }
   }
   const desc = [];
   lines.forEach((l, i) => {

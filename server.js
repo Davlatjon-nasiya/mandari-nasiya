@@ -541,6 +541,10 @@ app.get('/api/catalog', async (_, res) => {
     refreshFeaturedAd(popular);
     if (featuredAd && featuredAd.id!==popular.id) featuredAd=null;
   }
+  if (popular && !featuredAd) {
+    let imgs=[]; try { imgs=JSON.parse(popular.images||'[]'); } catch (_) {}
+    featuredAd={id:popular.id,name:popular.name,price:popular.price,price_usd:popular.price_usd||0,image:imgs[0]||popular.image||'',headline:'Ko‘pchilik tanlayotgan telefon!'};
+  }
   res.json({
     products: db.prepare('SELECT p.id,p.name,p.price,p.stock,p.image,p.images,p.description,p.category,p.variants,p.old_price,p.sale_until,p.price_usd,p.old_price_usd,(SELECT COUNT(*) FROM product_views v WHERE v.product_id=p.id) AS views,(SELECT COUNT(*) FROM favorites f WHERE f.product_id=p.id) AS likes FROM products p WHERE p.active=1 ORDER BY p.id DESC').all().map(shape),
     markups: markupsMap(),

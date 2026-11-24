@@ -160,8 +160,15 @@ body{max-width:1180px;padding:18px 24px 112px;background:#080a0d;color:#f6f7fa}
 @keyframes loadingSweep{from{transform:translateX(-120%)}to{transform:translateX(390%)}}
 @media(max-width:380px){.splash-scene{width:270px;height:270px}.splash-core{transform:scale(.86)}#splash .sn{font-size:23px}}
 @media(prefers-reduced-motion:reduce){.splash-orbit,.splash-orange,.splash-ring,#splash:before,.splash-loading i{animation:none}}
+
+/* Distinct phone-brand orbit badges */
+.splash-orbit span.device{font-family:Arial,sans-serif;font-weight:900;letter-spacing:-1px;color:#fff;font-size:22px}
+.splash-orbit span.iphone{font-size:30px;background:linear-gradient(145deg,#c7cbd2,#454b56);color:#101216;border-color:#e8edf4;box-shadow:0 0 20px #cbd5e155}
+.splash-orbit span.samsung{font-size:30px;font-style:italic;background:linear-gradient(145deg,#253d87,#101a3b);border-color:#6484ed;box-shadow:0 0 20px #4169e155}
+.splash-orbit span.redmi{font-size:15px;letter-spacing:-.5px;background:linear-gradient(145deg,#e83b2f,#77150f);border-color:#ff7669;box-shadow:0 0 20px #e83b2f66}
+.splash-orbit span.iphone-pro{background:linear-gradient(145deg,#b9a68b,#45413c);border-color:#e0c9a7}
 </style></head><body>
-<div id="splash"><div class="splash-scene"><div class="splash-orbit orbit-one"><span>📱</span></div><div class="splash-orbit orbit-two"><span>📲</span></div><div class="splash-orbit orbit-three"><span>📱</span></div><div class="splash-orbit orbit-four"><span>📲</span></div><div class="splash-core"><div class="splash-orange">🍊</div><div class="splash-ring"></div></div></div><div class="sn">MANDARIN <em>NASIYA</em></div><div class="ss">Telefonlar olami — qulay nasiya!</div><div class="splash-loading"><i></i></div></div><div class="bg" id="bg"><i></i><i></i><i></i></div>
+<div id="splash"><div class="splash-scene"><div class="splash-orbit orbit-one"><span class="device iphone"></span></div><div class="splash-orbit orbit-two"><span class="device samsung">S</span></div><div class="splash-orbit orbit-three"><span class="device redmi">Redmi</span></div><div class="splash-orbit orbit-four"><span class="device iphone-pro">📱</span></div><div class="splash-core"><div class="splash-orange">🍊</div><div class="splash-ring"></div></div></div><div class="sn">MANDARIN <em>NASIYA</em></div><div class="ss">Telefonlar olami — qulay nasiya!</div><div class="splash-loading"><i></i></div></div><div class="bg" id="bg"><i></i><i></i><i></i></div>
 
 <div class="top brand-top"><div class="brand"><div class="brand-mark">🍊</div><div><h1>Mandarin <em>Nasiya</em></h1><small>Telefonlar · Nasiya · Yetkazib berish</small></div></div><div class="top-actions"><button id="langBtn" class="sec" onclick="setLang()">🇷🇺 RU</button><button id="adminBtn" class="sec hidden" onclick="openAdmin()">👑 Admin</button></div></div>
 <div class="promo" id="promo">🔥 Qulay to‘lov, ishonchli xizmat!</div><div id="msg"></div>

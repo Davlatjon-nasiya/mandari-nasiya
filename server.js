@@ -1024,7 +1024,8 @@ app.post('/api/admin/broadcast/product', auth, admin, async (req,res)=>{
   (async()=>{
     let images=[];try{images=JSON.parse(p.images||'[]')}catch(_){}
     const photo=images[0]||p.image||'';
-    const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nBatafsil ma’lumot va nasiya shartlari uchun tugmani bosing.\nReklama xabarlarini to‘xtatish: /stopads';
+    const monthly12=Math.ceil(Number(p.price)*(1+markupFor(12)/100)/12);
+    const caption=['🍊 MANDARIN NASIYA','', '📱 Mahsulot: '+p.name, '💵 Naqd narxi: '+Number(p.price).toLocaleString('uz-UZ')+' so‘m', '💳 12 oyga: '+monthly12.toLocaleString('uz-UZ')+' so‘mdan / oyiga', '', '📦 Mavjud: '+Number(p.stock)+' dona', '🚚 Yetkazib berish mavjud', '', 'Buyurtma berish va boshqa muddatlarni ko‘rish uchun quyidagi tugmani bosing.', '', 'Reklama xabarlarini to‘xtatish: /stopads'].join('\n');
     const link='https://t.me/'+botUser+'?start=p'+p.id;
     for(const uid of targets){
       try{
@@ -1226,7 +1227,8 @@ if (process.env.BOT_TOKEN && process.env.WEBAPP_URL && process.env.WEBAPP_URL.st
         const uid=String(row.telegram_id),p=marketingProductFor(uid);if(!p)break;
         let images=[];try{images=JSON.parse(p.images||'[]')}catch(_){}
         const photo=images[0]||p.image||'',link='https://t.me/'+botUser+'?start=p'+p.id;
-        const caption='🍊 Mandarin Nasiya\\n\\n📱 '+p.name+'\\n💰 '+Number(p.price).toLocaleString('uz-UZ')+' so‘m'+(p.price_usd>0?' ('+p.price_usd+' $)':'')+'\\n\\nSiz ko‘rgan mahsulot tavsiyasi. Batafsil ma’lumot va nasiya shartlari ilovada.\nReklama xabarlarini to‘xtatish: /stopads';
+        const monthly12=Math.ceil(Number(p.price)*(1+markupFor(12)/100)/12);
+        const caption=['🍊 MANDARIN NASIYA','', '📱 Siz ko‘rgan mahsulot: '+p.name, '💵 Naqd narxi: '+Number(p.price).toLocaleString('uz-UZ')+' so‘m', '💳 12 oyga: '+monthly12.toLocaleString('uz-UZ')+' so‘mdan / oyiga', '', '📦 Mavjud: '+Number(p.stock)+' dona', '🚚 Yetkazib berish mavjud', '', 'Batafsil ma’lumot va buyurtma uchun tugmani bosing.', '', 'Reklama xabarlarini to‘xtatish: /stopads'].join('\n');
         try{
           const opts={reply_markup:{inline_keyboard:[[{text:'📱 Batafsil ko‘rish',url:link}]]}};
           if(photo)await bot.sendPhoto(uid,photo,{...opts,caption:caption.slice(0,1000)});else await bot.sendMessage(uid,caption,opts);
